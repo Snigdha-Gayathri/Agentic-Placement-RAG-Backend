@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "placement-rag-agent"
+version = "0.1.0"
+description = "Interview RAG Agent with secure backend-driven retrieval"
+authors = [ { name = "User" } ]
+readme = "README.md"
+license = { text = "MIT" }
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["backend*", "security*"]

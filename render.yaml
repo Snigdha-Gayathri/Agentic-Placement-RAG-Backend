@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: placement-rag-agent-backend
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: RATE_LIMIT
+        value: "30"
+      - key: RATE_WINDOW_SECONDS
+        value: "60"
+      - key: MAX_QUERY_LENGTH
+        value: "2000"
+      - key: MAX_CONTEXT_LENGTH
+        value: "12000"
+      - key: MAX_OUTPUT_TOKENS
+        value: "800"
+      - key: MAX_RETRIEVED_CHUNKS
+        value: "8"
+      - key: SIMILARITY_THRESHOLD
+        value: "0.12"
+      - key: HALLUCINATION_THRESHOLD
+        value: "0.45"
+      - key: PROMPT_INJECTION_THRESHOLD
+        value: "0.65"

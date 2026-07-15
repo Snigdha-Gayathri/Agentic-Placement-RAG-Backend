@@ -1,0 +1,61 @@
+# ============================================================================
+# Agentic RAG Pipeline — Default Configuration
+# ============================================================================
+# All values below can be overridden via environment variables prefixed with
+# RAG_ (e.g. RAG_LLM_MODEL, RAG_CHUNK_SIZE).  Feature toggles use the prefix
+# RAG_FEATURE_ (e.g. RAG_FEATURE_HYDE=true).
+
+llm:
+  llm_provider: gemini
+  llm_model: gemini-2.5-flash
+  temperature: 0.3
+  max_output_tokens: 1024
+
+embeddings:
+  embedding_model: text-embedding-004
+  embedding_dimension: 768
+
+chunking:
+  chunk_strategy: recursive      # fixed | recursive | semantic | sliding_window | sentence_window | parent_child
+  chunk_size: 500                # target words per chunk
+  chunk_overlap: 50              # overlap in words between consecutive chunks
+
+retrieval:
+  retrieval_top_k: 20            # number of candidates returned by retrievers
+  similarity_threshold: 0.3     # minimum cosine similarity to include
+  retriever_type: hybrid         # dense | bm25 | hybrid
+  hybrid_dense_weight: 0.7
+  hybrid_sparse_weight: 0.3
+
+reranking:
+  reranking_enabled: true
+  reranker_model: cross-encoder/ms-marco-MiniLM-L-6-v2
+  reranking_top_k: 5             # final number of chunks after reranking
+
+agent:
+  agent_enabled: true
+  agent_max_iterations: 3        # max plan-execute cycles per query
+
+hyde:
+  hyde_enabled: false             # Hypothetical Document Embedding
+
+memory:
+  memory_enabled: true
+  memory_max_turns: 10           # conversation turns to keep in memory
+
+vector_db:
+  vector_db_path: data/chroma_db
+  vector_db_collection: placement_rag
+
+feature_toggles:
+  dense_retrieval: true
+  bm25_retrieval: true
+  hybrid_retrieval: true
+  cross_encoder_reranking: true
+  metadata_filtering: true
+  hyde: false
+  conversation_memory: true
+  query_rewriting: true
+  agent_planning: true
+  multi_hop_retrieval: false
+  chunk_enhancement: false

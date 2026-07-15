@@ -1,0 +1,38 @@
+# Logs
+logs
+*.log
+
+# Python & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Vector Database & Ingestion State (MUST NOT be committed)
+data/chroma_db/
+data/vector_index.json
+data/.ingestion_state.json
+chroma_db/
+chroma_db_backup/
+
+# Environment Variables
+.env
+.env.*
+!.env.example
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
