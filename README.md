@@ -1,104 +1,334 @@
-# Agentic Placement RAG — Backend Service
+<div align="center">
 
-A production-ready, highly secure, and observable **FastAPI + ChromaDB + Gemini** backend powering the **Agentic Placement RAG Assistant**.
+# 🤖 Agentic Placement RAG — Backend
 
-This backend features state-of-the-art hybrid search (`BM25` + `Dense Cosine Embeddings`), cross-encoder reranking, multi-hop query rewriting, autonomous agentic planning cycles, multi-layered security guardrails, and real-time Server-Sent Events (SSE) telemetry.
+### Production-grade, security-hardened Agentic RAG engine for technical placement prep
 
----
+*Hybrid retrieval · HyDE query expansion · Cross-encoder reranking · Multi-layer security · Real-time observability*
 
-## Key Features
+[![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Gemini](https://img.shields.io/badge/Gemini-2.5_Flash-4285F4?logo=googlegemini&logoColor=white)](https://ai.google.dev/)
+[![ChromaDB](https://img.shields.io/badge/ChromaDB-Vector_DB-8A2BE2)](https://www.trychroma.com/)
+[![Render](https://img.shields.io/badge/Render-Deployed-46E3B7?logo=render&logoColor=white)](https://agentic-placement-rag.onrender.com/)
+[![License](https://img.shields.io/badge/License-MIT-lightgrey)](#-license)
 
-- **Automatic ChromaDB Initialization on Startup**:
-  The Chroma database is never committed to Git. Instead, when the service starts up on a new environment (such as Render or a fresh local setup) and detects that no vector index exists (`total_chunks == 0`), the backend automatically scans all raw PDF knowledge base files in `data/`, computes embeddings, builds the persistent ChromaDB index, and initializes the BM25 corpus automatically. Zero manual database setup required!
-- **Multi-Layered Security Guardrails (`security/`)**:
-  - **Input Validator**: Normalizes queries, limits token length, and filters forbidden patterns.
-  - **Prompt Injection Detector**: Blocks jailbreak vectors and heuristic injection attempts.
-  - **Sliding Window Rate Limiter**: Protects endpoints against DDoS and excessive token consumption.
-  - **Retrieval Guard**: Filters out non-relevant candidate chunks (`similarity_threshold`).
-  - **Context Sanitizer**: Removes potential prompt injection payloads embedded in retrieved documents before passing them to the LLM.
-  - **Grounding & Hallucination Guard**: Verifies LLM output against retrieved chunks to ensure fidelity.
-- **Hybrid Search & Reranking**:
-  Combines exact keyword matching via `rank-bm25` with dense semantic search via Gemini embeddings (`text-embedding-004`), followed by cross-encoder reranking (`cross-encoder/ms-marco-MiniLM-L-6-v2`) for peak precision.
-- **Observability & SSE Streaming**:
-  Emits live pipeline execution stages (`/api/pipeline-status/{request_id}`) and detailed developer dashboard metrics (`/api/dashboard/{request_id}`).
+[🚀 Live Backend](https://agentic-placement-rag.onrender.com/) · [🎨 Frontend Repo](https://github.com/Snigdha-Gayathri/Agentic-Placement-RAG-Frontend) · [📖 Frontend README](../Agentic-Placement-RAG-Frontend/README.md)
+
+</div>
 
 ---
 
-## Architecture & Module Layout
+## 🎯 Overview
+
+The **Agentic Placement RAG Backend** is a `FastAPI + ChromaDB + Gemini 2.5 Flash` service that powers an AI assistant for technical placement interview prep (DSA, System Design, Behavioral, and Company-Specific Q&A). It combines **hybrid retrieval** (dense + BM25), **HyDE query expansion**, **cross-encoder reranking**, and a **six-layer security pipeline**, streaming every pipeline stage back to the frontend over Server-Sent Events (SSE) for full transparency.
+
+> On first boot, if no vector index exists, the service automatically ingests the PDFs in `data/`, builds embeddings, and initializes the BM25 corpus — **zero manual database setup.**
+
+---
+
+## ✨ Features
+
+<details open>
+<summary><b>🤖 Agentic RAG</b></summary>
+
+- Autonomous multi-stage planning cycle per query (rewrite → expand → retrieve → rerank → ground → generate)
+- Agent-driven decisions on whether to re-retrieve or expand context
+- Modular `core/agent` engine decoupled from transport layer
+</details>
+
+<details open>
+<summary><b>🔍 Hybrid Retrieval</b></summary>
+
+- Dense semantic search via Gemini `text-embedding-004`
+- Sparse keyword search via `rank-bm25`
+- Score fusion for precision + recall balance
+</details>
+
+<details open>
+<summary><b>🧠 HyDE Query Expansion</b></summary>
+
+- Generates a hypothetical answer document to enrich sparse or ambiguous queries before retrieval
+- Improves recall on underspecified or jargon-heavy questions
+</details>
+
+<details open>
+<summary><b>⚡ Cross-Encoder Reranking</b></summary>
+
+- `cross-encoder/ms-marco-MiniLM-L-6-v2` reranks top candidates for peak precision
+- Configurable similarity threshold filters low-relevance chunks
+</details>
+
+<details open>
+<summary><b>🛡️ Security Layer</b></summary>
+
+- Input validation, prompt injection detection, sliding-window rate limiting
+- Retrieval guard, context sanitization, grounding/hallucination verification
+</details>
+
+<details open>
+<summary><b>📊 Developer Dashboard</b></summary>
+
+- Live SSE pipeline-stage tracking (`/api/pipeline-status/{request_id}`)
+- Per-request dashboard payload (`/api/dashboard/{request_id}`)
+</details>
+
+<details open>
+<summary><b>📈 Observability Metrics</b></summary>
+
+- Faithfulness, relevancy, and latency tracking via the `evaluation/` engine
+</details>
+
+<details open>
+<summary><b>☁️ Google Drive Sync</b></summary>
+
+- Knowledge base PDFs can be ingested from `data/` and re-indexed automatically on redeploy
+</details>
+
+---
+
+## 🏗️ Architecture
 
 ```
+                   User
+                     │
+                     ▼
+        React + Vite Frontend
+                     │
+                     ▼
+            FastAPI Backend
+                     │
+ ┌───────────────────┼───────────────────┐
+ │                   │                   │
+ ▼                   ▼                   ▼
+Security         Agent Router      Dashboard
+ │                   │                   │
+ └──────────────┬────┴──────────────┬────┘
+                ▼
+        Hybrid Retriever
+        Dense + BM25 + HyDE
+                │
+                ▼
+       Cross-Encoder Reranker
+                │
+                ▼
+          Gemini 2.5 Flash
+                │
+                ▼
+          Streaming Response
+```
+
+---
+
+## 🧩 Folder Structure
+
+```
+Agentic-Placement-RAG-Backend/
 ├── backend/
-│   ├── app/             # FastAPI main application, routes, Pydantic models, and SecureRAGService
-│   ├── config/          # Pipeline settings and YAML configurations
-│   ├── core/            # Core RAG engine (agent, chunking, embeddings, hyde, memory, reranking, retrieval, vector_store)
-│   ├── evaluation/      # RAG metrics engine (faithfulness, relevancy, latency tracking)
-│   ├── ingestion/       # Document processing pipeline (PDF loaders, chunk enhancers, metadata extractors)
-│   └── observability/   # Live stage trackers and dashboard data structures
-├── security/            # Production security guardrails package
-├── tests/               # Comprehensive unit and guardrail verification suite
-├── data/                # Raw knowledge base PDF documents (*.pdf)
-├── requirements.txt     # Python dependencies for deployment
-├── pyproject.toml       # Package definition and build metadata
-└── render.yaml          # Render web service deployment configuration
+│   ├── app/             # FastAPI app, routes, Pydantic models, SecureRAGService
+│   ├── config/          # Pipeline settings & YAML configuration
+│   ├── core/            # RAG engine: agent, chunking, embeddings, hyde,
+│   │                    #   memory, reranking, retrieval, vector_store
+│   ├── evaluation/      # Faithfulness / relevancy / latency metrics engine
+│   ├── ingestion/       # PDF loaders, chunk enhancers, metadata extractors
+│   └── observability/   # Live stage trackers & dashboard data structures
+├── security/            # Production security guardrail package
+├── tests/               # Unit + guardrail verification suite
+├── data/                # Raw knowledge base PDFs
+├── requirements.txt     # Python dependencies
+├── pyproject.toml       # Package metadata
+└── render.yaml          # Render deployment config
 ```
 
 ---
 
-## Quick Start (Local Development)
+## 🛠️ Tech Stack
 
-### Prerequisites
-- Python `3.10+`
-- A valid Google Gemini API Key (`GEMINI_API_KEY`)
+**AI / ML**
 
-### 1. Installation
-Create and activate a virtual environment, then install requirements:
+![Gemini](https://img.shields.io/badge/Gemini_2.5_Flash-4285F4?logo=googlegemini&logoColor=white)
+![ChromaDB](https://img.shields.io/badge/ChromaDB-Vector_DB-8A2BE2)
+![BM25](https://img.shields.io/badge/rank--bm25-Sparse_Retrieval-orange)
+![CrossEncoder](https://img.shields.io/badge/Cross--Encoder-MiniLM--L6--v2-yellow)
+
+**Backend**
+
+![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![Pydantic](https://img.shields.io/badge/Pydantic-Validation-E92063)
+![SSE](https://img.shields.io/badge/SSE-Streaming-red)
+
+**Security**
+
+![Guardrails](https://img.shields.io/badge/Security-6_Layer_Guardrails-critical)
+![RateLimit](https://img.shields.io/badge/Rate_Limiting-Sliding_Window-lightgrey)
+
+**Deployment**
+
+![Render](https://img.shields.io/badge/Render-Web_Service-46E3B7?logo=render&logoColor=white)
+
+**Tooling**
+
+![Pytest](https://img.shields.io/badge/Testing-Pytest-0A9EDC?logo=pytest&logoColor=white)
+![Uvicorn](https://img.shields.io/badge/Uvicorn-ASGI-499848)
+
+---
+
+## ⚙️ RAG Pipeline
+
+```
+User Query
+      │
+      ▼
+Input Validation
+      │
+      ▼
+Prompt Injection Detection
+      │
+      ▼
+Query Rewriting
+      │
+      ▼
+HyDE Expansion
+      │
+      ▼
+Hybrid Retrieval
+(Dense + BM25)
+      │
+      ▼
+Cross-Encoder Reranking
+      │
+      ▼
+Context Grounding
+      │
+      ▼
+Gemini 2.5 Flash
+      │
+      ▼
+Output Validation
+      │
+      ▼
+Streaming Response
+```
+
+---
+
+## 🔐 Security Pipeline
+
+| # | Guard | Purpose |
+|---|-------|---------|
+| 1 | **Input Validator** | Normalizes queries, limits token length, filters forbidden patterns |
+| 2 | **Prompt Injection Detector** | Blocks jailbreak vectors and heuristic injection attempts |
+| 3 | **Sliding Window Rate Limiter** | Protects endpoints against DDoS and excessive token consumption |
+| 4 | **Retrieval Guard** | Filters out non-relevant candidate chunks via similarity threshold |
+| 5 | **Context Sanitizer** | Strips prompt-injection payloads embedded in retrieved documents |
+| 6 | **Grounding & Hallucination Guard** | Verifies LLM output against retrieved chunks for factual fidelity |
+
+Every guard emits a pass/fail verdict visible on the frontend's Security Events panel in real time.
+
+---
+
+## 📈 Metrics
+
+| Metric | Description | Source |
+|--------|-------------|--------|
+| Faithfulness | How well the answer is grounded in retrieved chunks | `evaluation/` |
+| Relevancy | Semantic alignment between query and answer | `evaluation/` |
+| Retrieval Latency | Time spent in hybrid retrieval + reranking | `observability/` |
+| Generation Latency | Time spent in Gemini generation | `observability/` |
+| Guardrail Verdicts | Pass/fail per security layer | `security/` |
+| Context Window Usage | Tokens consumed vs. budget | `observability/` |
+
+---
+
+## 🚀 Deployment
+
+```
+React (Render Static)
+          │
+          ▼
+        HTTPS
+          │
+          ▼
+FastAPI (Render Web Service)
+          │
+          ▼
+      Gemini API
+          │
+          ▼
+    Google Drive / data/
+```
+
+Pre-configured for Render via `render.yaml`:
+
+1. Connect this repo to Render as a **Web Service**.
+2. Render applies:
+   - **Build Command:** `pip install -r requirements.txt`
+   - **Start Command:** `uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT`
+3. Set `GEMINI_API_KEY` under Environment Variables.
+4. Deploy — the backend indexes `data/` PDFs on first boot and serves RAG queries immediately.
+
+---
+
+## 📚 API Documentation
+
+| Endpoint | Method | Description |
+|----------|--------|--------------|
+| `/api/query` | `POST` | Submit a query, returns streamed agentic RAG response |
+| `/api/pipeline-status/{request_id}` | `GET` (SSE) | Live pipeline stage updates for a given request |
+| `/api/dashboard/{request_id}` | `GET` | Full observability payload (latencies, scores, verdicts) |
+| `/docs` | `GET` | Interactive Swagger UI (auto-generated by FastAPI) |
+
+> Full request/response schemas are available via the auto-generated Swagger UI at `/docs` once the server is running.
+
+---
+
+## 💻 Local Development
+
+**Prerequisites:** Python `3.10+`, a valid `GEMINI_API_KEY`
+
 ```bash
+# 1. Create and activate a virtual environment
 python -m venv .venv
-# On Windows:
-.venv\Scripts\activate
-# On macOS/Linux:
-source .venv/bin/activate
+source .venv/bin/activate      # Windows: .venv\Scripts\activate
 
+# 2. Install dependencies
 pip install -r requirements.txt
-```
 
-### 2. Environment Configuration
-Copy `.env.example` to `.env` and set your `GEMINI_API_KEY`:
-```bash
+# 3. Configure environment
 cp .env.example .env
-```
-In `.env`:
-```env
-GEMINI_API_KEY=AIzaSy...
-```
+# then set GEMINI_API_KEY=AIzaSy... in .env
 
-### 3. Run FastAPI Server
-```bash
+# 4. Run the server
 uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
 ```
-On startup, the backend will verify if `data/chroma_db` exists. If not, it will automatically read the PDFs in `data/`, generate embeddings, and store them locally.
 
-API documentation (`Swagger UI`) will be available at `http://127.0.0.1:8000/docs`.
+Swagger UI: `http://127.0.0.1:8000/docs`
+On startup, if `data/chroma_db` doesn't exist, the backend automatically indexes PDFs in `data/`.
 
 ---
 
-## Testing
+## 🧪 Testing
 
-Run the automated test suite (`unit` + `security` guardrails) using `pytest`:
 ```bash
 python -m pytest tests/ -v
 ```
 
+| Suite | Covers |
+|-------|--------|
+| **Security tests** | Guardrail behavior — injection detection, rate limiting, sanitization |
+| **API tests** | Endpoint contracts and response schemas |
+| **Retrieval tests** | Hybrid search accuracy, reranking, HyDE expansion |
+
 ---
 
-## Render Deployment
+## 🔗 Related
 
-This repository is pre-configured for instant deployment on **Render** as a Python Web Service via `render.yaml`.
+- 🎨 [Frontend README](https://github.com/Snigdha-Gayathri/Agentic-Placement-RAG-Frontend) — UI, dashboard, and developer experience
+- 🌐 [Live Demo](https://agentic-placement-rag.onrender.com/)
 
-### Steps:
-1. Connect this GitHub repository (`Agentic-Placement-RAG-Backend`) to your Render account as a **Web Service**.
-2. Render will automatically pick up settings from `render.yaml`:
-   - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT`
-3. Under the Render **Environment Variables** settings, add your `GEMINI_API_KEY` secret.
-4. Trigger deploy. The backend will start up, automatically index the PDFs inside `data/` on first launch, and serve RAG queries cleanly.
+---
+
+## 📄 License
+
+MIT — see `LICENSE` for details.
