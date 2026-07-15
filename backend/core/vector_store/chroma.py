@@ -204,3 +204,11 @@ class ChromaVectorStore(BaseVectorStore):
                 name=self.collection_name,
                 metadata={"hnsw:space": "cosine"},
             )
+
+    def delete_by_source(self, source_file: str) -> None:
+        if self._collection:
+            try:
+                self._collection.delete(where={"source_file": source_file})
+                logger.info("Deleted old ChromaDB chunks for source: %s", source_file)
+            except Exception as exc:
+                logger.error("Failed to delete chunks for %s: %s", source_file, exc)
