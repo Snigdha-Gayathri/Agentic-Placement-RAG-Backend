@@ -113,84 +113,60 @@ class SecureRAGService:
 
         # Modern RAG & Agentic components
         self.chroma_store = ChromaVectorStore()
-        self.embedder = GeminiEmbedding()
-        self.dense_retriever = DenseRetriever(self.embedder, self.chroma_store)
-        self.bm25_retriever = BM25Retriever(self.chroma_store)
-        self.hybrid_retriever = HybridRetriever(self.dense_retriever, self.bm25_retriever)
+        self._embedder = None
+        self._dense_retriever = None
+        self._bm25_retriever = None
+        self._hybrid_retriever = None
         self.query_router = QueryRouter()
-        self.reranker = CrossEncoderReranker()
+        self._reranker = None
         self.memory = ConversationMemory()
         self.query_rewriter = QueryRewriter()
         self.gemini = GeminiClient()
-        self.hyde_generator = HyDEGenerator(self.gemini, self.embedder)
-        self.agent_executor = AgentExecutor(self.hybrid_retriever, self.gemini)
+        self._hyde_generator = None
+        self._agent_executor = None
         self.metrics_engine = RAGMetrics()
 
-        # Always run the sync and ingest logic on startup
-        self._startup_sync_and_ingest()
+    @property
+    def embedder(self) -> GeminiEmbedding:
+        if self._embedder is None:
+            self._embedder = GeminiEmbedding()
+        return self._embedder
 
-    def _startup_sync_and_ingest(self) -> None:
-        """Connects to Google Drive, downloads new PDFs, and manages vector ingestion."""
-        try:
-            # 1. Sync PDFs from Google Drive
-            syncer = DriveSyncer(data_path="data")
-            new_or_modified_files = syncer.sync_pdfs()
-            
-            is_empty_db = self.chroma_store.get_stats().total_chunks == 0
-            
-            if is_empty_db:
-                logger.info("ChromaDB is empty. Running full ingestion pipeline...")
-                # Full rebuild to ingest all PDFs in data/
-                pipeline = IngestionPipeline(Path("data"), ChunkingConfig(strategy="recursive", chunk_size=500, chunk_overlap=50))
-                chunks, _ = pipeline.run(force_rebuild=True)
-                if chunks:
-                    self._add_chunks_to_db(chunks)
-                    logger.info("Auto-populated ChromaDB with %d chunks.", len(chunks))
-            elif new_or_modified_files:
-                logger.info("ChromaDB exists. Processing %d modified/new files.", len(new_or_modified_files))
-                # Delete old chunks for modified files
-                for file_name in new_or_modified_files:
-                    # source_file in metadata typically stores the relative path or file name.
-                    # IngestionPipeline uses `str(file_path)` or `file_path.name`.
-                    # For safety, let's delete using the name.
-                    self.chroma_store.delete_by_source(file_name)
-                    
-                # Run incremental ingestion (force_rebuild=False)
-                # It will only process the newly downloaded/modified files because their hashes changed.
-                pipeline = IngestionPipeline(Path("data"), ChunkingConfig(strategy="recursive", chunk_size=500, chunk_overlap=50))
-                chunks, _ = pipeline.run(force_rebuild=False)
-                if chunks:
-                    self._add_chunks_to_db(chunks)
-                    logger.info("Differentially ingested %d chunks.", len(chunks))
-            else:
-                logger.info("ChromaDB is up to date. No new PDFs to ingest.")
-                
-        except Exception as exc:
-            logger.error("Failed during startup sync and ingest: %s", exc)
-            
-    def _add_chunks_to_db(self, chunks) -> None:
-        doc_chunks = []
-        for i, c in enumerate(chunks):
-            meta = ChunkMetadata(
-                chunk_id=c.chunk_id or f"init_auto_{i}_{hash(c.text)}",
-                source_file=Path(c.source_path).name,
-                company=c.metadata.get("company", "General"),
-                page_number=c.page_number or 0,
-                chunk_index=c.chunk_index or i,
-                chunk_strategy="recursive",
-                tags=[t.strip() for t in c.metadata.get("tags", "").split(",") if t.strip()] if isinstance(c.metadata.get("tags"), str) else [],
-                topic=c.metadata.get("topic", "General"),
-                difficulty=c.metadata.get("difficulty", "Medium"),
-                role=c.metadata.get("role", "SDE"),
-                enhancement_applied=",".join(c.enhancements_applied),
-            )
-            doc_chunks.append(DocumentChunk(text=c.enhanced_text or c.text, metadata=meta))
-            
-        texts = [dc.text for dc in doc_chunks]
-        embeddings = asyncio.run(self.embedder.embed_batch(texts))
-        self.chroma_store.add_documents(doc_chunks, embeddings)
-        if hasattr(self.bm25_retriever, "_index_corpus"):
-            self.bm25_retriever._index_corpus()
+    @property
+    def dense_retriever(self) -> DenseRetriever:
+        if self._dense_retriever is None:
+            self._dense_retriever = DenseRetriever(self.embedder, self.chroma_store)
+        return self._dense_retriever
+
+    @property
+    def bm25_retriever(self) -> BM25Retriever:
+        if self._bm25_retriever is None:
+            self._bm25_retriever = BM25Retriever(self.chroma_store)
+        return self._bm25_retriever
+
+    @property
+    def hybrid_retriever(self) -> HybridRetriever:
+        if self._hybrid_retriever is None:
+            self._hybrid_retriever = HybridRetriever(self.dense_retriever, self.bm25_retriever)
+        return self._hybrid_retriever
+
+    @property
+    def reranker(self) -> CrossEncoderReranker:
+        if self._reranker is None:
+            self._reranker = CrossEncoderReranker()
+        return self._reranker
+
+    @property
+    def hyde_generator(self) -> HyDEGenerator:
+        if self._hyde_generator is None:
+            self._hyde_generator = HyDEGenerator(self.gemini, self.embedder)
+        return self._hyde_generator
+
+    @property
+    def agent_executor(self) -> AgentExecutor:
+        if self._agent_executor is None:
+            self._agent_executor = AgentExecutor(self.hybrid_retriever, self.gemini)
+        return self._agent_executor
 
     def get_feature_toggles(self) -> dict[str, bool]:
         return dict(DEFAULT_FEATURE_TOGGLES)
