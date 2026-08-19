@@ -1,0 +1,59 @@
+company,source_title,source_url,source_date,evidence_type
+OpenAI,OpenAI interview guide,https://openai.com/interview-guide/,Not exposed,COMPANY_TECHNICAL_FOCUS
+OpenAI,OpenAI Research Engineer Interview Experience (2025),https://www.tryexponent.com/experiences/openai-machine-learning-engineer-interview-c7b6a2,Not exposed,REPORTED_QUESTION
+OpenAI,OpenAI Interview Process & Experience Megathread [2026],https://www.reddit.com/r/Hack2Hire/comments/1tqdmyr/openai_interview_process_experience_megathread/,2026,REPORTED_INTERVIEW_PROCESS
+Anthropic,"Anthropic ML Engineer, Prompt Engineer Interview Experience",https://www.tryexponent.com/experiences/anthropic-machine-learning-engineer-interview-27873a,2026,REPORTED_INTERVIEW_PROCESS
+Anthropic,Machine Learning Engineer Interview Experience - San Francisco,https://www.jointaro.com/interviews/companies/anthropic/experiences/machine-learning-engineer-san-francisco-ca-may-1-2024-no-offer-negative-fdd002ad/,2024-05-01,REPORTED_QUESTION
+Anthropic,Anthropic careers,https://www.anthropic.com/careers,Not exposed,COMPANY_TECHNICAL_FOCUS
+Cohere,Cohere jobs,https://jobs.ashbyhq.com/cohere,2026,ROLE_REQUIREMENT
+Cohere,My 2026 Cohere Interview Process and Actual Questions I Faced,https://www.linkjob.ai/interview-questions/cohere-interview-process-and-questions/,2025-09-09,REPORTED_QUESTION
+Cohere,What are transformer models? Use cases and examples,https://cohere.com/blog/transformer-model,2024-12-20,COMPANY_TECHNICAL_FOCUS
+Perplexity,Perplexity Interview Guide,https://www.perplexity.ai/hub/careers/interview-guide,Not exposed,COMPANY_TECHNICAL_FOCUS
+xAI,Careers: Build AI That Advances Humanity,https://x.ai/careers,Not exposed,ROLE_REQUIREMENT
+xAI,xAI Machine Learning Engineer DeepSearch interview questions,"https://www.glassdoor.com/Interview/xAI-Machine-Learning-Engineer-DeepSearch-Interview-Questions-EI_IE10404667.0,3_KO4,40.htm",Not exposed,REPORTED_INTERVIEW_PROCESS
+Databricks,Interviewing With Us,https://www.databricks.com/company/careers/interview-prep,Not exposed,COMPANY_TECHNICAL_FOCUS
+Databricks,[Megathread] Hiring and Interviewing at Databricks,https://www.reddit.com/r/databricks/comments/1jf5d8r/megathread_hiring_and_interviewing_at_databricks/,2025-03-19,REPORTED_INTERVIEW_PROCESS
+Snowflake,AI Engineering,https://careers.snowflake.com/us/en/ai-ml-engineering,Not exposed,ROLE_REQUIREMENT
+Snowflake,Snowflake Interview Experiences with IC1 / IC2 Rounds,https://www.reddit.com/r/leetcode/comments/1l3i90k/snowflake_interview_experiences_with_ic1_ic2/,2025,REPORTED_INTERVIEW_PROCESS
+Scale AI,"Machine Learning Engineer Interview Experience - San Jose, California",https://www.jointaro.com/interviews/companies/scale-ai/experiences/machine-learning-engineer-san-jose-california-january-1-2024-no-offer-neutral-886fb1b4/,2024-01-01,REPORTED_QUESTION
+Scale AI,Scale ML Engineer Interview Experience & Questions,"https://www.glassdoor.com/Interview/Scale-ML-Engineer-Interview-Questions-EI_IE1656849.0,5_KO6,17.htm",Not exposed,REPORTED_INTERVIEW_PROCESS
+LangChain,LangChain Deployed Engineer Interview Experience,https://www.tryexponent.com/experiences/lang-chain-machine-learning-engineer-interview-fea4c2,Not exposed,REPORTED_INTERVIEW_PROCESS
+LangChain,LangChain,https://www.langchain.com/,Not exposed,COMPANY_TECHNICAL_FOCUS
+Replit,Our Interview Process,https://replit.com/interview-process,Not exposed,COMPANY_TECHNICAL_FOCUS
+Replit,Engineer Interview Experience - San Francisco,https://www.jointaro.com/interviews/companies/replit/experiences/engineer-san-francisco-california-november-1-2021-accepted-offer-positive-b1d2ddee/,2021-11-01,REPORTED_QUESTION
+Weights & Biases,Careers at Weights & Biases,https://wandb.ai/site/careers/,Not exposed,COMPANY_TECHNICAL_FOCUS
+Weights & Biases,Weights & Biases AI Engineer interview questions,"https://www.glassdoor.com/Interview/Weights-and-Biases-AI-Engineer-Interview-Questions-EI_IE2231103.0,18_KO19,30.htm",Not exposed,REPORTED_INTERVIEW_PROCESS
+Harvey,The Ultimate Guide to Landing a Job at Harvey,https://www.harvey.ai/blog/landing-a-job-at-harvey,2026-08-05,COMPANY_TECHNICAL_FOCUS
+Harvey,Software Engineer Interview Experience - United States,https://www.jointaro.com/interviews/companies/harvey-ai/experiences/software-engineer-united-states-july-6-2025-no-offer-negative-32e463e6/,2025-07-06,REPORTED_QUESTION
+Runway,Careers in AI Video Technology,https://runway.com/en/careers,2026,ROLE_REQUIREMENT
+Runway,Runway Senior Machine Learning Engineer interview questions,"https://www.glassdoor.com/Interview/Runway-NYC-Senior-Machine-Learning-Engineer-Interview-Questions-EI_IE5638023.0,10_KO11,43.htm",Not exposed,REPORTED_INTERVIEW_PROCESS
+Glean,Careers at Glean,https://www.glean.com/careers,Not exposed,COMPANY_TECHNICAL_FOCUS
+Glean,Glean Technologies Machine Learning Engineer interview guide,https://dataford.io/interview-guides/glean-technologies/machine-learning-engineer,2026-07-05,REPORTED_INTERVIEW_PROCESS
+Together AI,Careers | Together AI,https://www.together.ai/careers,Not exposed,ROLE_REQUIREMENT
+Together AI,Together AI Machine Learning Engineer interview guide,https://dataford.io/interview-guides/together-ai/machine-learning-engineer,2026-08-01,REPORTED_INTERVIEW_PROCESS
+Groq,Groq Careers,https://www.groq.com/careers,2026,ROLE_REQUIREMENT
+Groq,Groq Engineer Interview Experience & Questions,"https://www.glassdoor.com/Interview/Groq-Engineer-Interview-Questions-EI_IE2473036.0,4_KO5,13.htm",Not exposed,REPORTED_INTERVIEW_PROCESS
+Salesforce,How Salesforce Hires,https://www.salesforce.com/company/careers/culture/how-we-hire/,Not exposed,COMPANY_TECHNICAL_FOCUS
+Salesforce,This Staff AI interview at Salesforce was way more intense than expected,https://www.reddit.com/r/OfferEngineering/comments/1syye9w/this_staff_ai_interview_at_salesforce_was_way/,2026-04-29,REPORTED_QUESTION
+ServiceNow,How we hire - ServiceNow Careers,https://careers.servicenow.com/how-we-hire/,Not exposed,ROLE_REQUIREMENT
+ServiceNow,I have a servicenow LLM engineer interview coming up,https://www.reddit.com/r/servicenow/comments/1hv795z/i_have_a_servicenow_llm_engineer_interview_coming/,2025-01-06,REPORTED_INTERVIEW_PROCESS
+Palantir,Careers,https://www.palantir.com/careers/,Not exposed,ROLE_REQUIREMENT
+Palantir,Palantir Software Engineer Interview Experience - New Grad 2026,https://www.reddit.com/r/leetcode/comments/1tuytm0/palantir_software_engineer_interview_experience/,2026-06-02,REPORTED_INTERVIEW_PROCESS
+Stripe,"Machine Learning Engineer, Radar",https://stripe.com/careers/listing/machine-learning-engineer-radar/7983456,2026,ROLE_REQUIREMENT
+Stripe,Machine Learning Engineer Interview Experience - United States,https://www.jointaro.com/interviews/companies/stripe/experiences/machine-learning-engineer-united-states-march-14-2022-no-offer-negative-91e22ff6/,2022-03-14,REPORTED_INTERVIEW_PROCESS
+Atlassian,Atlassian engineering interview handbook,https://www.atlassian.com/company/careers/resources/interviewing/engineering,Not exposed,COMPANY_TECHNICAL_FOCUS
+Atlassian,Atlassian Machine Learning Engineer work experience,https://www.jointaro.com/interviews/companies/atlassian/work-experiences/machine-learning-engineer-bengaluru-june-9-2024-5-ca8e5b35/,2025-02-01,REPORTED_INTERVIEW_PROCESS
+AMD,"Interview Experience @ AMD, Senior Software Engineer (AI) [2024]",https://ihitsuperhuman.medium.com/interview-experience-amd-ai-engineer-2024-1a86afd025ad,2024-12-21,REPORTED_QUESTION
+Intel,Sr. Machine Learning Engineer,https://intel.wd1.myworkdayjobs.com/en-US/External/job/Sr-Machine-Learning-Engineer_JR0285966,2026-08-14,ROLE_REQUIREMENT
+Intel,"Interview Experience @ Intel, AI Engineer [2024]",https://ihitsuperhuman.medium.com/interview-experience-intel-ai-engineer-2024-fb553ea08eb7,2024-12-07,REPORTED_QUESTION
+Qualcomm,Qualcomm Interview Experience,https://leetcode.com/discuss/interview-experience/7411588/,2025-12-13,REPORTED_QUESTION
+PayPal,Machine Learning Engineer Interview Experience - India,https://www.jointaro.com/interviews/companies/paypal/experiences/machine-learning-engineer-india-august-1-2024-no-offer-negative-dfd1625f/,2024-08-01,REPORTED_QUESTION
+Mastercard,Our hiring process,https://careers.mastercard.com/us/en/mastercards-hiring-process,Not exposed,COMPANY_TECHNICAL_FOCUS
+Mastercard,Interview experience at Mastercard,https://www.reddit.com/r/interviews/comments/1nd5r1p/interview_experience_at_mastercard/,2025-09-10,REPORTED_INTERVIEW_PROCESS
+Spotify,Spotify Machine Learning Engineer Interview Guide,https://www.interviewquery.com/interview-guides/spotify-machine-learning-engineer,2026-03-17,COMPANY_TECHNICAL_FOCUS
+ByteDance,AI Machine Learning Engineer Graduate (Search) - 2026 Start (PhD),https://joinbytedance.com/search/7607045118566484277,2026,ROLE_REQUIREMENT
+ByteDance,ByteDance Machine Learning Engineer Interview Experience,https://www.jointaro.com/interviews/companies/bytedance/experiences/machine-learning-engineer-seattle-washington-october-1-2025-declined-offer-positive-b7903d1c/,2025,REPORTED_QUESTION
+Tencent,Questionable Technical Interview at Tencent,https://www.reddit.com/r/nus/comments/1ezdjbj/questionable_technical_interview_at_tencent/,2024-08-23,REPORTED_QUESTION
+Tencent,Tencent Machine Learning Engineer Interview Experience & Questions,"https://www.glassdoor.com/Interview/Tencent-Machine-Learning-Engineer-Interview-Questions-EI_IE38281.0,7_KO8,33.htm",2023-08-18,REPORTED_INTERVIEW_PROCESS
+Alibaba,Alibaba Machine Learning Engineer work experience,https://www.jointaro.com/interviews/companies/alibaba/work-experiences/machine-learning-engineer-june-20-2023-4-b9f68a49/,2025,REPORTED_QUESTION
+Alibaba,Alibaba Group Machine Learning Engineer interview questions,"http://www.glassdoor.com/Interview/Alibaba-Group-Machine-Learning-Engineer-Interview-Questions-EI_IE225974.0,13_KO14,39.htm",Not exposed,REPORTED_INTERVIEW_PROCESS
