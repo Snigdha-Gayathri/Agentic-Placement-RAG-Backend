@@ -1,9 +1,9 @@
 services:
   - type: web
-    name: placement-rag-agent-backend
+    name: placement-rag-agent-api
     env: python
     plan: starter
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r backend/requirements.txt
     startCommand: uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: GEMINI_API_KEY
@@ -28,3 +28,33 @@ services:
         value: "0.45"
       - key: PROMPT_INJECTION_THRESHOLD
         value: "0.65"
+
+  - type: web
+    name: placement-rag-agent-ui
+    env: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: placement-rag-agent-api
+          property: host
+      - key: VITE_API_BASE_URL
+        fromService:
+          type: web
+          name: placement-rag-agent-api
+          property: host
+      - key: NODE_VERSION
+        value: "20"
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: SAMEORIGIN
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
