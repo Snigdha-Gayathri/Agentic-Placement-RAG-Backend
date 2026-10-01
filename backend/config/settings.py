@@ -38,19 +38,15 @@ DEFAULT_FEATURE_TOGGLES: dict[str, bool] = {
     "conversation_memory": True,
     "query_rewriting": True,
     "agent_planning": True,
-    "multi_hop_retrieval": False,
-    "chunk_enhancement": False,
+    "multi_hop_retrieval": True,
+    "chunk_enhancement": True,
+    "jev_decision": False,
 }
 
 
 @dataclass
 class PipelineConfig:
-    """Central configuration for the entire RAG pipeline.
-
-    Values are loaded from environment variables when available, falling back
-    to the defaults declared here.  Feature toggles can be updated at runtime
-    via :func:`update_feature_toggle`.
-    """
+    """Central configuration for the entire RAG pipeline."""
 
     # -- LLM ------------------------------------------------------------------
     llm_provider: str = "gemini"
@@ -94,6 +90,14 @@ class PipelineConfig:
     vector_db_path: str = "data/chroma_db"
     vector_db_collection: str = "placement_rag"
 
+    # -- TypeSafe AI Jev / System One -----------------------------------------
+    jev_enabled: bool = False
+    typesafe_api_key: str = ""
+    jev_base_url: str = "https://api.beatapi.io"
+    jev_model: str = "jev-1.13-free"
+    jev_timeout_seconds: float = 10.0
+    jev_max_retries: int = 2
+
     # -- Feature toggles -------------------------------------------------------
     feature_toggles: dict[str, bool] = field(default_factory=lambda: dict(DEFAULT_FEATURE_TOGGLES))
 
@@ -119,7 +123,7 @@ class PipelineConfig:
 
         cfg = cls(
             llm_provider=_env("RAG_LLM_PROVIDER", "gemini"),
-            llm_model=_env("RAG_LLM_MODEL", "gemini-2.5-flash"),
+            llm_model=_env("RAG_LLM_MODEL", _env("GEMINI_MODEL", "gemini-2.5-flash")),
             temperature=_env("RAG_TEMPERATURE", 0.3, float),
             max_output_tokens=_env("RAG_MAX_OUTPUT_TOKENS", 1024, int),
             embedding_model=_env("RAG_EMBEDDING_MODEL", "gemini-embedding-001"),
@@ -142,13 +146,22 @@ class PipelineConfig:
             memory_max_turns=_env("RAG_MEMORY_MAX_TURNS", 10, int),
             vector_db_path=_env("RAG_VECTOR_DB_PATH", "data/chroma_db"),
             vector_db_collection=_env("RAG_VECTOR_DB_COLLECTION", "placement_rag"),
-            gemini_api_key=_env("GEMINI_API_KEY", "") or _env("VITE_GEMINI_API_KEY", "")  )
+            gemini_api_key=_env("GEMINI_API_KEY", ""),
+            jev_enabled=_env("JEV_ENABLED", False, bool),
+            typesafe_api_key=_env("TYPESAFE_API_KEY", _env("BEATAPI_API_KEY", "")),
+            jev_base_url=_env("TYPESAFE_BASE_URL", _env("BEATAPI_BASE_URL", "https://api.beatapi.io")),
+            jev_model=_env("JEV_MODEL", "jev-1.13-free"),
+            jev_timeout_seconds=_env("JEV_TIMEOUT_SECONDS", 10.0, float),
+            jev_max_retries=_env("JEV_MAX_RETRIES", 2, int),
+        )
         # Merge any env-based feature overrides
         for feature in DEFAULT_FEATURE_TOGGLES:
             env_key = f"RAG_FEATURE_{feature.upper()}"
             env_val = os.getenv(env_key)
             if env_val is not None:
                 cfg.feature_toggles[feature] = env_val.lower() in ("1", "true", "yes", "on")
+        if cfg.jev_enabled:
+            cfg.feature_toggles["jev_decision"] = True
         return cfg
 
     @classmethod
@@ -166,8 +179,6 @@ class PipelineConfig:
         for section in raw.values():
             if isinstance(section, dict):
                 flat.update(section)
-            # top-level scalars are kept as-is
-        # Create with YAML values, env overrides take priority (via from_env logic)
         cfg = cls.from_env()
         for key, value in flat.items():
             if hasattr(cfg, key) and os.getenv(f"RAG_{key.upper()}") is None:
@@ -195,10 +206,7 @@ _config_instance: PipelineConfig | None = None
 
 
 def get_config() -> PipelineConfig:
-    """Return the global singleton :class:`PipelineConfig`.
-
-    Thread-safe.  On first call, loads from environment variables.
-    """
+    """Return the global singleton :class:`PipelineConfig`."""
     global _config_instance
     if _config_instance is None:
         with _config_lock:
@@ -212,15 +220,7 @@ def get_config() -> PipelineConfig:
 
 
 def update_feature_toggle(feature: str, enabled: bool) -> None:
-    """Update a feature toggle at runtime.
-
-    Args:
-        feature: The feature name (must be a known toggle).
-        enabled: Whether to enable or disable the feature.
-
-    Raises:
-        KeyError: If *feature* is not a recognised toggle name.
-    """
+    """Update a feature toggle at runtime."""
     cfg = get_config()
     if feature not in cfg.feature_toggles:
         raise KeyError(

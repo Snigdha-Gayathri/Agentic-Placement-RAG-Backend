@@ -153,7 +153,15 @@ class RetrievalGraphBuilder:
                 "termination_reason": "SECURITY_BLOCKED",
             }
 
-        plan_res = self.planner.plan(query, history)
+        if hasattr(self.planner, "plan_async"):
+            plan_res = await self.planner.plan_async(
+                query,
+                history,
+                active_toggles=state.get("active_toggles"),
+                query_id=state.get("session_id", ""),
+            )
+        else:
+            plan_res = self.planner.plan(query, history)
         profile = plan_res["profile"]
 
         trace_step = PlanStep(
@@ -172,6 +180,7 @@ class RetrievalGraphBuilder:
             "retrieval_plan": plan_res["planned_operations"],
             "skipped_operations": plan_res["skipped_operations"],
             "retrieval_trace": existing_trace,
+            "decision_metadata": plan_res.get("decision_metadata", {}),
             "target_company": profile["detected_companies"][0] if profile["detected_companies"] else None,
             "detected_topics": profile["detected_topics"],
             "rewrite_used": plan_res["rewrite_needed"],
@@ -563,36 +572,93 @@ class RetrievalGraphBuilder:
         }
 
     async def _node_evaluate_evidence(self, state: AgenticRAGState) -> dict[str, Any]:
-        """Evaluate evidence quality and sufficiency."""
+        """Evaluate evidence quality and sufficiency via DecisionBackend or heuristic tool."""
         active_q = state.get("rewritten_query") or state.get("original_query", "")
         chunks = state.get("final_context_chunks", [])
         target_comp = state.get("target_company")
         trace = list(state.get("retrieval_trace", []))
         executed = list(state.get("executed_operations", []))
+        decision_meta = dict(state.get("decision_metadata", {}))
 
-        ev_res = self.evaluate_tool.execute(active_q, chunks, target_company=target_comp)
-        sufficiency = ev_res.output
+        backend = getattr(self.planner, "decision_backend", None)
+        active_toggles = state.get("active_toggles", {})
+        if active_toggles and "jev_decision" in active_toggles:
+            if not active_toggles["jev_decision"]:
+                from backend.core.decision.factory import get_decision_backend
+                backend = get_decision_backend(name="heuristic")
+            elif backend is None or getattr(backend, "name", "") != "jev":
+                from backend.core.decision.factory import get_decision_backend
+                backend = get_decision_backend(name="jev")
+        elif backend is None:
+            from backend.core.decision.factory import get_decision_backend
+            backend = get_decision_backend()
+
+        if backend is not None and getattr(backend, "name", "") == "jev":
+            suff_decision = await backend.evaluate_evidence_sufficiency(
+                query=active_q,
+                chunks=chunks,
+                target_company=target_comp,
+                query_id=state.get("session_id", ""),
+            )
+            is_suff = suff_decision.is_sufficient
+            status = suff_decision.status
+            score = suff_decision.score
+            reasons = suff_decision.reasons
+            missing = suff_decision.missing_aspects
+            if suff_decision.fallback_occurred:
+                tool_name = "EvaluateEvidenceTool (Heuristic Fallback)"
+                summary = f"Evidence status: {status} (Heuristic fallback, reason: {suff_decision.fallback_reason})"
+                decision_meta["sufficiency_confidence"] = 0.0
+                decision_meta["sufficiency_probabilities"] = {}
+            else:
+                tool_name = "JevEvidenceEvaluator"
+                summary = f"Evidence status: {status} (Jev confidence={suff_decision.confidence:.2f}, score={score:.2f})"
+                decision_meta["sufficiency_confidence"] = suff_decision.confidence
+                decision_meta["sufficiency_probabilities"] = suff_decision.probabilities
+
+            lat = suff_decision.latency_ms
+            decision_meta["sufficiency_status"] = status
+            decision_meta["evidence_sufficient"] = is_suff
+            decision_meta["sufficiency_fallback"] = suff_decision.fallback_occurred
+            if suff_decision.fallback_reason:
+                decision_meta["sufficiency_fallback_reason"] = suff_decision.fallback_reason
+        else:
+            ev_res = self.evaluate_tool.execute(active_q, chunks, target_company=target_comp)
+            sufficiency = ev_res.output
+            is_suff = sufficiency.is_sufficient
+            status = sufficiency.status
+            score = sufficiency.score
+            reasons = sufficiency.reasons
+            missing = sufficiency.missing_aspects
+            tool_name = "EvaluateEvidenceTool"
+            summary = ev_res.summary
+            lat = ev_res.latency_ms
+
+            decision_meta["sufficiency_status"] = status
+            decision_meta["evidence_sufficient"] = is_suff
+            decision_meta["sufficiency_confidence"] = 1.0
 
         executed.append("EVIDENCE_ASSESSMENT")
         trace.append(
             PlanStep(
-                tool_name="EvaluateEvidenceTool",
-                reasoning=f"Sufficiency check: {sufficiency.status} (score={sufficiency.score})",
+                tool_name=tool_name,
+                reasoning=f"Sufficiency check: {status} (score={score})",
                 inputs={"chunk_count": len(chunks), "target_company": target_comp or "None"},
-                output_summary=ev_res.summary,
-                latency_ms=ev_res.latency_ms,
+                output_summary=summary,
+                latency_ms=lat,
                 status="SUCCESS",
             ).to_dict()
         )
 
         return {
             "evidence_assessment": {
-                "status": sufficiency.status,
-                "is_sufficient": sufficiency.is_sufficient,
-                "score": sufficiency.score,
-                "reasons": sufficiency.reasons,
-                "missing_aspects": sufficiency.missing_aspects,
+                "status": status,
+                "is_sufficient": is_suff,
+                "score": score,
+                "reasons": reasons,
+                "missing_aspects": missing,
             },
+            "decision_metadata": decision_meta,
             "retrieval_trace": trace,
             "executed_operations": executed,
         }

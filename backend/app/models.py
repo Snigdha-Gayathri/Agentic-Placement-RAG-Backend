@@ -16,6 +16,7 @@ class ChatRequest(BaseModel):
     query: str = Field(min_length=1, max_length=12000)
     session_id: str | None = Field(default=None, max_length=128)
     request_id: str | None = Field(default=None, max_length=128)
+    toggles: dict[str, bool] = Field(default_factory=dict)
 
 
 class GuardrailMeta(BaseModel):
@@ -49,6 +50,7 @@ class PipelineData(BaseModel):
     hyde_info: dict[str, Any] = Field(default_factory=dict)
     memory_info: dict[str, Any] = Field(default_factory=dict)
     metrics_info: dict[str, Any] = Field(default_factory=dict)
+    decision_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChatResponse(BaseModel):
@@ -87,6 +89,7 @@ class FeatureToggleConfig(BaseModel):
     agent_planning: bool = True
     multi_hop_retrieval: bool = False
     chunk_enhancement: bool = False
+    jev_decision: bool = False
 
 
 class VectorDBStatsModel(BaseModel):

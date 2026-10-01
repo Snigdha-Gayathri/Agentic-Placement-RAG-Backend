@@ -37,7 +37,7 @@ class HyDEGenerator:
             "that accurately answers the prompt. Do not include introductory filler."
         )
         resp = await self.llm.generate(system_prompt=system_p, user_prompt=query, max_tokens=300)
-        hypo_doc = resp.text.strip()
+        hypo_doc = resp.text.strip() if hasattr(resp, "text") else str(resp).strip()
         emb = await self.embedder.embed_text(hypo_doc)
         latency = round((time.perf_counter() - start_t) * 1000, 2)
         return HyDEResult(

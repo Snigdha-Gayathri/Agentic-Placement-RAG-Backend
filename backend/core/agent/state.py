@@ -108,3 +108,7 @@ class AgenticRAGState(TypedDict, total=False):
     # 17. Final Answer & Disclosure
     generated_answer: str
     answer_disclosure: str
+
+    # 18. Structured Decision Metadata & Telemetry
+    decision_metadata: dict[str, Any]
+    active_toggles: dict[str, bool]

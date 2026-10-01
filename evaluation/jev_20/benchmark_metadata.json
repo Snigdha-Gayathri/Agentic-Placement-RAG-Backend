@@ -1,0 +1,29 @@
+{
+  "benchmark_name": "Canonical 20-Query Interview-Preparation Benchmark",
+  "version": "2.0.0",
+  "created_at": "2026-10-02T02:00:00Z",
+  "num_queries": 20,
+  "system_domain": "Agentic Placement RAG: Company-Specific Interview Preparation System",
+  "target_companies": ["Amazon", "Google", "NVIDIA"],
+  "corpus_chunks": 357,
+  "relevant_chunks_assigned": 53,
+  "insufficient_evidence_queries": ["Q18"],
+  "decision_points_per_query": {
+    "retrieval_planning": "plan_retrieval (RetrievalStrategyDecision)",
+    "evidence_sufficiency": "evaluate_evidence_sufficiency (SufficiencyDecision)",
+    "reassessment": "evaluate_evidence_sufficiency (conditional on escalation)"
+  },
+  "models": {
+    "jev_model": "jev-1.13-free",
+    "jev_endpoint": "https://api.beatapi.io/v1/systemone",
+    "jev_cost": "$0.00 / 1M tokens",
+    "embedding_model": "text-embedding-004",
+    "generation_model": "gemini-2.5-flash",
+    "reranker_model": "cross-encoder/ms-marco-MiniLM-L-6-v2"
+  },
+  "pacing_policy": {
+    "cooldown_seconds": 65,
+    "target_rpm": "<= 0.92 RPM",
+    "rate_limit_free_tier": "1 successful request per minute per account"
+  }
+}

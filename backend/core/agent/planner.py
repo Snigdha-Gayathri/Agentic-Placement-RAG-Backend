@@ -1,9 +1,12 @@
-"""Agent planning and reasoning trace structures."""
+"""Agent planning, query classification, and dynamic retrieval strategy planning."""
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
+
+from backend.core.retrieval.router import QueryRouter
 
 
 @dataclass
@@ -15,6 +18,7 @@ class PlanStep:
     inputs: dict[str, Any] = field(default_factory=dict)
     output_summary: str = ""
     latency_ms: float = 0.0
+    status: str = "SUCCESS"  # SUCCESS, SKIPPED, FALLBACK, FAILED
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -23,6 +27,7 @@ class PlanStep:
             "inputs": self.inputs,
             "output_summary": self.output_summary,
             "latency_ms": self.latency_ms,
+            "status": self.status,
         }
 
 
@@ -35,6 +40,8 @@ class ReasoningTrace:
     need_metadata_filter: bool = False
     need_multi_hop: bool = False
     need_hyde: bool = False
+    need_rerank: bool = True
+    need_chunk_enhancement: bool = False
     enough_evidence: bool = False
     steps: list[PlanStep] = field(default_factory=list)
     iterations_taken: int = 1
@@ -46,6 +53,8 @@ class ReasoningTrace:
             "need_metadata_filter": self.need_metadata_filter,
             "need_multi_hop": self.need_multi_hop,
             "need_hyde": self.need_hyde,
+            "need_rerank": self.need_rerank,
+            "need_chunk_enhancement": self.need_chunk_enhancement,
             "enough_evidence": self.enough_evidence,
             "steps": [s.to_dict() for s in self.steps],
             "iterations_taken": self.iterations_taken,
@@ -58,70 +67,493 @@ class AgentPlan:
 
     trace: ReasoningTrace
     initial_steps: list[PlanStep]
+    planned_operations: list[str] = field(default_factory=list)
+    skipped_operations: list[dict[str, str]] = field(default_factory=list)
 
 
 class AgentPlanner:
-    """Planner that analyzes user query and context to construct a structured reasoning trace."""
+    """Dynamic Retrieval Strategy Agent: reasons over query characteristics to select optimal retrieval operations."""
 
-    def analyze(
+    # Amazon Leadership Principles recognized for exact entity matching
+    AMAZON_LPS = {
+        "customer obsession",
+        "ownership",
+        "invent and simplify",
+        "are right, a lot",
+        "learn and be curious",
+        "hire and develop the best",
+        "insist on the highest standards",
+        "think big",
+        "bias for action",
+        "frugality",
+        "earn trust",
+        "dive deep",
+        "have backbone; disagree and commit",
+        "deliver results",
+        "strive to be earth's best employer",
+        "success and scale bring broad responsibility",
+    }
+
+    def __init__(self, decision_backend: Any | None = None) -> None:
+        if decision_backend is not None:
+            self.decision_backend = decision_backend
+        else:
+            try:
+                from backend.core.decision.factory import get_decision_backend
+                self.decision_backend = get_decision_backend()
+            except Exception:
+                self.decision_backend = None
+
+    def analyze_query_profile(
         self,
         query: str,
-        rewritten_query: str | None = None,
-        metadata_filters: dict[str, Any] | None = None,
-        hyde_used: bool = False,
-        multi_hop_enabled: bool = False,
-    ) -> AgentPlan:
-        need_rewrite = bool(rewritten_query and rewritten_query != query)
-        need_meta = bool(metadata_filters and len(metadata_filters) > 0)
-        need_multi = bool(
-            multi_hop_enabled
-            and ("compare" in query.lower() or "difference" in query.lower() or len(query.split()) > 20)
+        conversation_history: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Analyze query linguistic and semantic characteristics."""
+        lowered = query.lower().strip()
+        words = re.findall(r"\b\w+\b", lowered)
+        word_count = len(words)
+
+        # 1. Company Detection (using QueryRouter canonical mapping)
+        detected_companies: list[str] = []
+        for comp_key, canonical in QueryRouter.CANONICAL_COMPANIES.items():
+            if re.search(r"\b" + re.escape(comp_key) + r"\b", lowered):
+                if canonical not in detected_companies:
+                    detected_companies.append(canonical)
+
+        # 2. Topic Detection
+        detected_topics: list[str] = []
+        for topic in QueryRouter.TOPICS:
+            if re.search(r"\b" + re.escape(topic) + r"\b", lowered):
+                detected_topics.append(topic)
+
+        # 3. Leadership Principle Detection
+        detected_lps: list[str] = []
+        for lp in self.AMAZON_LPS:
+            if lp in lowered:
+                detected_lps.append(lp.title())
+
+        # 4. Pronoun and Conversational References
+        pronouns = {"it", "this", "that", "they", "them", "these", "those", "he", "she", "previous"}
+        has_pronoun = bool(set(words).intersection(pronouns))
+        is_followup = bool(
+            has_pronoun
+            or lowered.startswith(("what about", "how about", "and ", "why is", "tell me more"))
+            or (word_count <= 4 and conversation_history and len(conversation_history) > 0)
         )
 
-        trace = ReasoningTrace(
-            need_retrieval=True,
-            need_query_rewrite=need_rewrite,
-            need_metadata_filter=need_meta,
-            need_multi_hop=need_multi,
-            need_hyde=hyde_used,
-            enough_evidence=False,
+        # 5. Multi-Part / Comparative Structure
+        is_comparison = bool(
+            (" vs " in lowered or " compare " in lowered or "difference between" in lowered)
+            and len(detected_companies) >= 2
+        )
+        has_multi_aspects = bool(
+            (" and " in lowered and ("principle" in lowered or "criteria" in lowered or "evaluation" in lowered))
+            or (("how should i answer" in lowered or "behavioral" in lowered) and ("demonstrate" in lowered or "evaluate" in lowered))
+            or ("round 1" in lowered and "round 2" in lowered)
+        )
+        needs_multi_hop = is_comparison or has_multi_aspects
+
+        # 6. Lexical vs Semantic Specificity
+        exact_lexical_cues = bool(
+            detected_lps
+            or (detected_companies and word_count <= 6 and not is_followup)
+            or any(w in lowered for w in ["dsa", "lru cache", "pagerank", "two sum", "solid principles", "cap theorem"])
+        )
+        pure_semantic_cues = bool(
+            lowered.startswith(("tell me about a time", "give me an example", "how would you handle", "describe a situation", "what is your approach"))
+            or any(phrase in lowered for phrase in ["without authority", "failed project", "tight deadline", "conflict with", "disagreed with"])
+        )
+        vocabulary_mismatch_likely = bool(
+            pure_semantic_cues and not detected_companies and not detected_lps
         )
 
-        steps: list[PlanStep] = [
-            PlanStep(
-                tool_name="RetrieveTool",
-                reasoning="Execute hybrid dense/sparse retrieval with strict canonical company filtering",
-                inputs={"query": rewritten_query or query, "filters": metadata_filters or {}},
-                latency_ms=12.5,
-            )
-        ]
+        return {
+            "lowered": lowered,
+            "word_count": word_count,
+            "detected_companies": detected_companies,
+            "detected_topics": detected_topics,
+            "detected_lps": detected_lps,
+            "is_followup": is_followup,
+            "is_comparison": is_comparison,
+            "has_multi_aspects": has_multi_aspects,
+            "needs_multi_hop": needs_multi_hop,
+            "exact_lexical_cues": exact_lexical_cues,
+            "pure_semantic_cues": pure_semantic_cues,
+            "vocabulary_mismatch_likely": vocabulary_mismatch_likely,
+        }
 
-        if need_multi:
-            steps.append(
-                PlanStep(
-                    tool_name="DecomposeQueryTool",
-                    reasoning="Query involves comparison/multi-part question; decomposing into targeted sub-queries",
-                    inputs={"query": rewritten_query or query},
-                    latency_ms=8.2,
-                )
-            )
+    def plan(
+        self,
+        query: str,
+        conversation_history: list[dict[str, Any]] | None = None,
+        active_toggles: dict[str, bool] | None = None,
+    ) -> dict[str, Any]:
+        """Produce dynamic, typed execution plan decisions for a query."""
+        toggles = active_toggles or {}
+        profile = self.analyze_query_profile(query, conversation_history)
 
-        steps.append(
-            PlanStep(
-                tool_name="EvaluateEvidenceTool",
-                reasoning="Verify retrieved candidates meet grounding threshold and cross-encoder entailment score",
-                inputs={"candidate_count": 8},
-                latency_ms=4.1,
-            )
+        planned_ops: list[str] = []
+        skipped_ops: list[dict[str, str]] = []
+
+        # 1. Query Rewriting Decision
+        rewrite_needed = bool(
+            toggles.get("query_rewriting", True)
+            and (profile["is_followup"] or profile["has_multi_aspects"] or profile["word_count"] > 25)
         )
-        steps.append(
-            PlanStep(
-                tool_name="GenerateAnswerTool",
-                reasoning="Synthesize comprehensive handbook-style response using context and summarized dialogue history",
-                inputs={"max_output_tokens": 8192},
-                latency_ms=0.0,
-            )
+        if rewrite_needed:
+            planned_ops.append("QUERY_REWRITE")
+            rewrite_reason = "Query contains conversational follow-up references, multi-part intent, or complex syntax benefiting from retrieval optimization."
+        else:
+            skipped_ops.append({
+                "operation": "QUERY_REWRITE",
+                "reason": "Query is standalone, clear, and unambiguous; rewriting was unnecessary."
+            })
+            rewrite_reason = "Query is self-contained; skipping rewrite."
+
+        # 2. Metadata Filtering Decision
+        meta_filters: dict[str, Any] = {}
+        filter_needed = False
+        filter_reason = ""
+        if toggles.get("metadata_filtering", True):
+            if profile["detected_companies"] and len(profile["detected_companies"]) == 1:
+                meta_filters["company"] = profile["detected_companies"][0]
+                filter_needed = True
+            if profile["detected_lps"]:
+                meta_filters["leadership_principle"] = profile["detected_lps"][0]
+                filter_needed = True
+
+        if filter_needed and meta_filters:
+            planned_ops.append("METADATA_FILTERING")
+            filter_reason = f"Applied precise constraints for verified entities: {meta_filters}"
+        else:
+            skipped_ops.append({
+                "operation": "METADATA_FILTERING",
+                "reason": "No restrictive metadata filter applied to preserve maximum recall across relevant corpus sections."
+            })
+            filter_reason = "Unfiltered retrieval selected to maximize cross-domain recall."
+
+        # 3. Retrieval Method Decision: BM25 vs Dense vs Hybrid RRF vs Multi-Hop
+        multi_hop_needed = bool(
+            toggles.get("multi_hop_retrieval", True) and profile["needs_multi_hop"]
         )
 
-        trace.steps = steps
-        return AgentPlan(trace=trace, initial_steps=steps)
+        bm25_needed = False
+        dense_needed = False
+        hybrid_needed = False
+        rrf_needed = False
+        embedding_needed = False
+        bm25_reason = ""
+        dense_reason = ""
+        hybrid_reason = ""
+        rrf_reason = ""
+
+        if multi_hop_needed:
+            planned_ops.append("MULTI_HOP_RETRIEVAL")
+            bm25_needed = True
+            dense_needed = True
+            hybrid_needed = True
+            rrf_needed = True
+            embedding_needed = True
+            bm25_reason = "Multi-hop sub-queries require keyword matching for specific entities and interview rounds."
+            dense_reason = "Multi-hop sub-queries require semantic similarity across behavioral criteria."
+            hybrid_reason = "Hybrid combination required across multiple evidence hops."
+            rrf_reason = "RRF fuses ranking candidates across hops."
+        elif profile["exact_lexical_cues"] and not profile["pure_semantic_cues"]:
+            # Simple lexical query (e.g. "Amazon Leadership Principles", "LRU cache", "Two Sum")
+            bm25_needed = True
+            bm25_reason = "Query consists of exact entities, leadership principles, or established technical terms where BM25 provides high lexical precision."
+            dense_needed = False
+            dense_reason = "Skipped dense search in favor of direct lexical matching."
+            hybrid_needed = False
+            rrf_needed = False
+            embedding_needed = False
+            planned_ops.append("BM25_RETRIEVAL")
+            skipped_ops.append({
+                "operation": "DENSE_RETRIEVAL",
+                "reason": "BM25 is optimal for exact leadership principles and keyword terms; dense search skipped to save latency."
+            })
+            skipped_ops.append({
+                "operation": "EMBEDDING_GENERATION",
+                "reason": "Embeddings not required when pure lexical BM25 retrieval is sufficient."
+            })
+            skipped_ops.append({
+                "operation": "HYBRID_RETRIEVAL",
+                "reason": "Lexical evidence sufficient; hybrid fusion not required."
+            })
+        elif profile["pure_semantic_cues"] and not profile["exact_lexical_cues"]:
+            # Pure semantic conceptual query (e.g. "Tell me about a time I had to influence someone without authority")
+            dense_needed = True
+            dense_reason = "Query is open-ended and conceptual; semantic dense retrieval captures deep behavioral similarity."
+            bm25_needed = False
+            bm25_reason = "Pure lexical match would fail on abstract behavioral descriptions with low verbatim overlap."
+            embedding_needed = True
+            hybrid_needed = False
+            rrf_needed = False
+            planned_ops.append("EMBEDDING_GENERATION")
+            planned_ops.append("DENSE_RETRIEVAL")
+            skipped_ops.append({
+                "operation": "BM25_RETRIEVAL",
+                "reason": "Skipped BM25 because query is abstract and lacks exact corpus keyword overlap."
+            })
+            skipped_ops.append({
+                "operation": "HYBRID_RETRIEVAL",
+                "reason": "Single dense retrieval path selected for semantic query."
+            })
+        else:
+            # Mixed / Hybrid query (contains both entities/topics and conceptual context)
+            bm25_needed = True
+            dense_needed = True
+            hybrid_needed = True
+            rrf_needed = True
+            embedding_needed = True
+            bm25_reason = "Matches exact terminology, company names, and technical topics."
+            dense_reason = "Captures semantic intent and descriptive context."
+            hybrid_reason = "Both lexical and semantic retrieval provide complementary recall for mixed query."
+            rrf_reason = "Reciprocal Rank Fusion fuses BM25 and dense ranking signals."
+            planned_ops.append("EMBEDDING_GENERATION")
+            planned_ops.append("BM25_RETRIEVAL")
+            planned_ops.append("DENSE_RETRIEVAL")
+            planned_ops.append("HYBRID_RETRIEVAL")
+            planned_ops.append("RRF_FUSION")
+
+        # 4. HyDE Decision
+        hyde_needed = bool(
+            toggles.get("hyde", False)
+            or (profile["vocabulary_mismatch_likely"] and not profile["exact_lexical_cues"])
+        )
+        if hyde_needed:
+            planned_ops.append("HYDE_GENERATION")
+            embedding_needed = True
+            hyde_reason = "Query is conceptual with vocabulary mismatch; hypothetical document expansion bridges semantic gap."
+        else:
+            skipped_ops.append({
+                "operation": "HYDE_GENERATION",
+                "reason": "Query contains sufficient direct retrieval vocabulary; hypothetical document generation skipped."
+            })
+            hyde_reason = "Query vocabulary is well-defined; HyDE skipped."
+
+        # 5. Chunk Enhancement Decision
+        chunk_enhancement_needed = bool(
+            toggles.get("chunk_enhancement", True)
+            and (profile["needs_multi_hop"] or profile["pure_semantic_cues"])
+        )
+        if chunk_enhancement_needed:
+            planned_ops.append("CHUNK_ENHANCEMENT")
+            chunk_enhancement_reason = "Contextual metadata prepending and section headers injected to improve context grounding."
+        else:
+            skipped_ops.append({
+                "operation": "CHUNK_ENHANCEMENT",
+                "reason": "Standard chunks provide sufficient clarity without runtime context expansion."
+            })
+            chunk_enhancement_reason = "Standard chunks utilized."
+
+        # 6. Cross-Encoder Reranking Decision
+        rerank_needed = bool(
+            toggles.get("cross_encoder_reranking", True)
+            and (hybrid_needed or multi_hop_needed or profile["pure_semantic_cues"] or profile["has_multi_aspects"])
+        )
+        if rerank_needed:
+            planned_ops.append("CROSS_ENCODER_RERANKING")
+            rerank_reason = "Candidate set requires precision cross-encoder reranking to optimize top-k context order."
+        else:
+            skipped_ops.append({
+                "operation": "CROSS_ENCODER_RERANKING",
+                "reason": "Initial retrieval score margin is clear; cross-encoder reranking bypassed to save latency."
+            })
+            rerank_reason = "Reranking skipped for low-ambiguity candidate set."
+
+        planned_ops.append("EVIDENCE_ASSESSMENT")
+        planned_ops.append("ANSWER_SYNTHESIS")
+
+        return {
+            "profile": profile,
+            "rewrite_needed": rewrite_needed,
+            "rewrite_reason": rewrite_reason,
+            "metadata_filter_needed": filter_needed,
+            "metadata_filters": meta_filters,
+            "metadata_filter_reason": filter_reason,
+            "embedding_needed": embedding_needed,
+            "embedding_reason": "Query embedding generated for dense semantic search." if embedding_needed else "Skipped; lexical retrieval only.",
+            "bm25_needed": bm25_needed,
+            "bm25_reason": bm25_reason,
+            "dense_needed": dense_needed,
+            "dense_reason": dense_reason,
+            "hybrid_needed": hybrid_needed,
+            "hybrid_reason": hybrid_reason,
+            "rrf_needed": rrf_needed,
+            "rrf_reason": rrf_reason,
+            "multi_hop_needed": multi_hop_needed,
+            "multi_hop_reason": "Multi-hop decomposition selected for multi-entity comparison or multi-aspect query." if multi_hop_needed else "Single-hop retrieval sufficient.",
+            "hyde_needed": hyde_needed,
+            "hyde_reason": hyde_reason,
+            "chunk_enhancement_needed": chunk_enhancement_needed,
+            "chunk_enhancement_reason": chunk_enhancement_reason,
+            "rerank_needed": rerank_needed,
+            "rerank_reason": rerank_reason,
+            "planned_operations": planned_ops,
+            "skipped_operations": skipped_ops,
+        }
+
+    async def plan_async(
+        self,
+        query: str,
+        conversation_history: list[dict[str, Any]] | None = None,
+        active_toggles: dict[str, bool] | None = None,
+        query_id: str = "",
+    ) -> dict[str, Any]:
+        profile = self.analyze_query_profile(query, conversation_history)
+        backend = self.decision_backend
+        if active_toggles and "jev_decision" in active_toggles:
+            if not active_toggles["jev_decision"]:
+                from backend.core.decision.factory import get_decision_backend
+                backend = get_decision_backend(name="heuristic")
+            elif backend is None or getattr(backend, "name", "") != "jev":
+                from backend.core.decision.factory import get_decision_backend
+                backend = get_decision_backend(name="jev")
+        elif backend is None:
+            from backend.core.decision.factory import get_decision_backend
+            backend = get_decision_backend()
+
+        if backend is not None and getattr(backend, "name", "") == "jev":
+            decision = await backend.plan_retrieval(
+                query=query,
+                conversation_history=conversation_history,
+                profile=profile,
+                active_toggles=active_toggles,
+                query_id=query_id,
+            )
+
+            jev_success = not decision.fallback_occurred
+            jev_called = getattr(backend, "is_configured", False) and not (
+                decision.fallback_occurred and "unconfigured" in (decision.fallback_reason or "").lower()
+            )
+            decision_backend = "jev" if jev_success else "heuristic"
+
+            decision_meta = {
+                "decision_backend": decision_backend,
+                "requested_backend": "jev",
+                "backend": decision_backend,
+                "jev_enabled": True,
+                "jev_called": jev_called,
+                "jev_success": jev_success,
+                "jev_model": getattr(backend, "model", "jev-1.13-free") if jev_called else "N/A",
+                "jev_action": decision.retrieval_mode.value,
+                "retrieval_mode": decision.retrieval_mode.value,
+                "hop_mode": decision.hop_mode.value,
+                "query_transformation": decision.query_transformation.value,
+                "route_type": decision.route_type.value,
+                "confidence": decision.confidence if jev_success else 0.0,
+                "probabilities": decision.probabilities if jev_success else {},
+                "latency_ms": decision.latency_ms if jev_success else 0.0,
+                "fallback_occurred": decision.fallback_occurred,
+                "fallback_reason": decision.fallback_reason,
+                "cost_usd": decision.log_record.estimated_cost_usd if (decision.log_record and jev_success) else 0.0,
+            }
+
+            return {
+                "profile": profile,
+                "rewrite_needed": decision.rewrite_needed,
+                "rewrite_reason": "Jev: " + decision.reasoning if decision.rewrite_needed else "Jev skipped rewrite.",
+                "metadata_filter_needed": decision.metadata_filter_needed,
+                "metadata_filters": decision.metadata_filters,
+                "metadata_filter_reason": f"Target company constraint: {decision.metadata_filters}" if decision.metadata_filters else "Unfiltered retrieval selected.",
+                "embedding_needed": decision.embedding_needed,
+                "embedding_reason": "Query embedding generated for dense semantic search." if decision.embedding_needed else "Skipped; lexical retrieval only.",
+                "bm25_needed": decision.bm25_needed,
+                "bm25_reason": f"BM25 retrieval ({decision.retrieval_mode.value})",
+                "dense_needed": decision.dense_needed,
+                "dense_reason": f"Dense retrieval ({decision.retrieval_mode.value})",
+                "hybrid_needed": decision.hybrid_needed,
+                "hybrid_reason": f"Hybrid combination ({decision.retrieval_mode.value})",
+                "rrf_needed": decision.rrf_needed,
+                "rrf_reason": "Reciprocal Rank Fusion fuses BM25 and dense ranking signals.",
+                "multi_hop_needed": decision.multi_hop_needed,
+                "multi_hop_reason": "Multi-hop decomposition selected by Jev." if decision.multi_hop_needed else "Single-hop retrieval sufficient.",
+                "hyde_needed": decision.hyde_needed,
+                "hyde_reason": "HyDE hypothetical document expansion selected by Jev." if decision.hyde_needed else "Query vocabulary is well-defined; HyDE skipped.",
+                "chunk_enhancement_needed": decision.chunk_enhancement_needed,
+                "chunk_enhancement_reason": "Chunk enhancement selected." if decision.chunk_enhancement_needed else "Standard chunks utilized.",
+                "rerank_needed": decision.rerank_needed,
+                "rerank_reason": "Candidate set requires cross-encoder reranking.",
+                "planned_operations": decision.planned_operations,
+                "skipped_operations": decision.skipped_operations,
+                "decision": decision,
+                "decision_metadata": decision_meta,
+            }
+
+        # Baseline mode
+        baseline_plan = self.plan(query, conversation_history, active_toggles)
+        baseline_meta = {
+            "decision_backend": "heuristic",
+            "requested_backend": "heuristic",
+            "backend": "heuristic",
+            "jev_enabled": False,
+            "jev_called": False,
+            "jev_success": False,
+            "jev_model": "None",
+            "jev_action": "hybrid" if baseline_plan["hybrid_needed"] else ("bm25" if baseline_plan["bm25_needed"] else "dense"),
+            "retrieval_mode": "hybrid" if baseline_plan["hybrid_needed"] else ("bm25" if baseline_plan["bm25_needed"] else "dense"),
+            "hop_mode": "multi_hop" if baseline_plan["multi_hop_needed"] else "single_hop",
+            "query_transformation": "rewrite" if baseline_plan["rewrite_needed"] else ("hyde" if baseline_plan["hyde_needed"] else "none"),
+            "route_type": "MULTI_HOP" if baseline_plan["multi_hop_needed"] else "SINGLE_HOP",
+            "confidence": 1.0,
+            "probabilities": {},
+            "latency_ms": 0.0,
+            "fallback_occurred": False,
+            "fallback_reason": None,
+            "cost_usd": 0.0,
+        }
+        baseline_plan["decision_metadata"] = baseline_meta
+        return baseline_plan
+
+    def plan_escalation(
+        self,
+        current_state: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Determine next escalation retrieval operation when evidence is insufficient."""
+        executed = current_state.get("executed_operations", [])
+        evidence = current_state.get("evidence_assessment", {})
+        status = evidence.get("status", "INSUFFICIENT")
+
+        # If already sufficient or unsupported company, do not escalate
+        if evidence.get("is_sufficient", False) or status == "UNSUPPORTED":
+            return {"escalate": False, "action": "TERMINATE", "reason": "Evidence is sufficient or company is not indexed."}
+
+        # Strategy 1: If BM25 was executed alone and evidence is insufficient, escalate to Dense + Hybrid
+        if "BM25_RETRIEVAL" in executed and "DENSE_RETRIEVAL" not in executed:
+            return {
+                "escalate": True,
+                "action": "ESCALATE_TO_DENSE",
+                "reason": "Lexical BM25 retrieval yielded insufficient evidence; escalating to dense semantic vector retrieval.",
+            }
+
+        # Strategy 2: If Dense was executed but relevance is low, escalate to HyDE expansion
+        if "DENSE_RETRIEVAL" in executed and "HYDE_GENERATION" not in executed:
+            return {
+                "escalate": True,
+                "action": "ESCALATE_TO_HYDE",
+                "reason": "Direct semantic retrieval produced marginal evidence; escalating to HyDE hypothetical document expansion.",
+            }
+
+        # Strategy 3: If candidate chunks were retrieved but not reranked, escalate to Cross-Encoder Reranking
+        if "CROSS_ENCODER_RERANKING" not in executed and len(current_state.get("retrieved_chunks", [])) >= 2:
+            return {
+                "escalate": True,
+                "action": "ESCALATE_TO_RERANK",
+                "reason": "Candidates exist but precision is uncertain; escalating to cross-encoder precision reranking.",
+            }
+
+        # Strategy 4: If multi-hop was not used but query had missing aspects, decompose missing aspects
+        if "MULTI_HOP_RETRIEVAL" not in executed and evidence.get("missing_aspects"):
+            return {
+                "escalate": True,
+                "action": "ESCALATE_TO_MULTI_HOP",
+                "reason": f"Missing critical aspects: {evidence.get('missing_aspects')}; escalating to targeted multi-hop retrieval.",
+            }
+
+        return {
+            "escalate": False,
+            "action": "TERMINATE",
+            "reason": "Budget exhausted or all viable escalation retrieval strategies have been executed.",
+        }
