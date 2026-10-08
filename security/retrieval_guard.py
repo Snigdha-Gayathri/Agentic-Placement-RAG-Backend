@@ -35,7 +35,7 @@ class RetrievalGuard:
         reasons: list[str] = []
         discarded = 0
 
-        for chunk in sorted(chunks, key=lambda c: getattr(c, "similarity", getattr(c, "score", getattr(c, "similarity_score", 0.0))), reverse=True):
+        for chunk in sorted(chunks, key=lambda c: getattr(c, "similarity", getattr(c, "score", getattr(c, "cross_encoder_score", getattr(c, "original_score", getattr(c, "similarity_score", 0.0))))), reverse=True):
             if len(safe) >= self._config.max_retrieved_chunks:
                 break
 
@@ -56,7 +56,7 @@ class RetrievalGuard:
                 reasons.append("retrieval_block_pattern")
                 continue
 
-            sim_val = getattr(chunk, "similarity", getattr(chunk, "score", getattr(chunk, "similarity_score", 0.0)))
+            sim_val = getattr(chunk, "similarity", getattr(chunk, "score", getattr(chunk, "cross_encoder_score", getattr(chunk, "original_score", getattr(chunk, "similarity_score", 0.0)))))
             score = max(float(sim_val), jaccard_similarity(query, text))
             if score < self._config.similarity_threshold:
                 discarded += 1

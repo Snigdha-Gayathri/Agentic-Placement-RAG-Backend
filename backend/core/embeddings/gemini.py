@@ -62,10 +62,7 @@ class GeminiEmbedding(BaseEmbedding):
 
     async def embed_text(self, text: str) -> list[float]:
         """Embed a single text string via the ``embedContent`` endpoint."""
-        endpoint = (
-            f"{_GEMINI_EMBED_BASE}/{self._model}:embedContent"
-            f"?key={self._api_key}"
-        )
+        endpoint = f"{_GEMINI_EMBED_BASE}/{self._model}:embedContent"
         payload: dict[str, Any] = {
             "model": f"models/{self._model}",
             "content": {"parts": [{"text": text}]},
@@ -106,10 +103,7 @@ class GeminiEmbedding(BaseEmbedding):
 
     async def _batch_request(self, texts: list[str]) -> list[list[float]]:
         """Send a single batch embed request."""
-        endpoint = (
-            f"{_GEMINI_EMBED_BASE}/{self._model}:batchEmbedContents"
-            f"?key={self._api_key}"
-        )
+        endpoint = f"{_GEMINI_EMBED_BASE}/{self._model}:batchEmbedContents"
         requests_payload = [
             {
                 "model": f"models/{self._model}",
@@ -134,11 +128,12 @@ class GeminiEmbedding(BaseEmbedding):
         """Make an HTTP POST with exponential-backoff retry."""
         last_error: Exception | None = None
         backoff = _INITIAL_BACKOFF_S
+        headers = {"x-goog-api-key": self._api_key}
 
         for attempt in range(1, _MAX_RETRIES + 1):
             try:
                 async with httpx.AsyncClient(timeout=_TIMEOUT_S) as client:
-                    response = await client.post(endpoint, json=payload)
+                    response = await client.post(endpoint, json=payload, headers=headers)
 
                 if response.status_code == 429 or response.status_code >= 500:
                     logger.warning(

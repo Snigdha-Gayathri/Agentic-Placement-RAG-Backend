@@ -29,11 +29,16 @@ def looks_like_base64(text: str) -> bool:
         return False
     if not re.fullmatch(r"[A-Za-z0-9+/=]+", compact):
         return False
+    # If text is composed of multiple natural space-separated words without base64 chars (+, /, =), treat as natural language
+    if " " in text and not any(ch in compact for ch in "+/="):
+        words = text.split()
+        if len(words) >= 3 and all(len(w) < 20 for w in words):
+            return False
     try:
-        base64.b64decode(compact, validate=True)
+        decoded = base64.b64decode(compact, validate=True)
+        return len(decoded) >= 16
     except (binascii.Error, ValueError):
         return False
-    return True
 
 
 def looks_like_hex_blob(text: str) -> bool:

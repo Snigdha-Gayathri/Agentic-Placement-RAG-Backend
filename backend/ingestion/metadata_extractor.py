@@ -54,6 +54,54 @@ class MetadataExtractor:
         "goldmansachs": "Goldman Sachs",
         "jp morgan": "JP Morgan",
         "jpmorgan": "JP Morgan",
+        "netflix": "Netflix",
+        "flipkart": "Flipkart",
+        "zoho": "Zoho",
+        "nvidia": "NVIDIA",
+        "tcs": "TCS",
+        "infosys": "Infosys",
+        "capgemini": "Capgemini",
+        "cognizant": "Cognizant",
+        "accenture": "Accenture",
+        "ltimindtree": "LTIMindtree",
+        "ibm": "IBM",
+        "openai": "OpenAI",
+        "anthropic": "Anthropic",
+        "cohere": "Cohere",
+        "perplexity": "Perplexity",
+        "perplexity ai": "Perplexity",
+        "xai": "xAI",
+        "x.ai": "xAI",
+        "databricks": "Databricks",
+        "snowflake": "Snowflake",
+        "scale ai": "Scale AI",
+        "scale": "Scale AI",
+        "langchain": "LangChain",
+        "replit": "Replit",
+        "weights & biases": "Weights & Biases",
+        "weights and biases": "Weights & Biases",
+        "wandb": "Weights & Biases",
+        "harvey": "Harvey",
+        "runway": "Runway",
+        "glean": "Glean",
+        "together ai": "Together AI",
+        "together": "Together AI",
+        "together.ai": "Together AI",
+        "groq": "Groq",
+        "salesforce": "Salesforce",
+        "servicenow": "ServiceNow",
+        "palantir": "Palantir",
+        "stripe": "Stripe",
+        "atlassian": "Atlassian",
+        "amd": "AMD",
+        "intel": "Intel",
+        "qualcomm": "Qualcomm",
+        "paypal": "PayPal",
+        "mastercard": "Mastercard",
+        "spotify": "Spotify",
+        "bytedance": "ByteDance",
+        "tencent": "Tencent",
+        "alibaba": "Alibaba",
     }
 
     # Ordered patterns for company extraction from filenames.
@@ -77,6 +125,47 @@ class MetadataExtractor:
         (r"vmware", "VMware"),
         (r"expedia", "Expedia"),
         (r"directi", "Directi"),
+        (r"netflix", "Netflix"),
+        (r"flipkart", "Flipkart"),
+        (r"zoho", "Zoho"),
+        (r"nvidia", "NVIDIA"),
+        (r"tcs\b", "TCS"),
+        (r"infosys", "Infosys"),
+        (r"capgemini", "Capgemini"),
+        (r"cognizant", "Cognizant"),
+        (r"accenture", "Accenture"),
+        (r"ltimindtree", "LTIMindtree"),
+        (r"ibm\b", "IBM"),
+        (r"openai", "OpenAI"),
+        (r"anthropic", "Anthropic"),
+        (r"cohere", "Cohere"),
+        (r"perplexity", "Perplexity"),
+        (r"\bxai\b|x\.ai", "xAI"),
+        (r"databricks", "Databricks"),
+        (r"snowflake", "Snowflake"),
+        (r"scale\s*ai", "Scale AI"),
+        (r"langchain", "LangChain"),
+        (r"replit", "Replit"),
+        (r"weights\s*(&|and)?\s*biases|wandb", "Weights & Biases"),
+        (r"harvey", "Harvey"),
+        (r"runway", "Runway"),
+        (r"glean", "Glean"),
+        (r"together\s*ai|together\.ai", "Together AI"),
+        (r"groq", "Groq"),
+        (r"salesforce", "Salesforce"),
+        (r"servicenow", "ServiceNow"),
+        (r"palantir", "Palantir"),
+        (r"stripe", "Stripe"),
+        (r"atlassian", "Atlassian"),
+        (r"\bamd\b", "AMD"),
+        (r"intel\b", "Intel"),
+        (r"qualcomm", "Qualcomm"),
+        (r"paypal", "PayPal"),
+        (r"mastercard", "Mastercard"),
+        (r"spotify", "Spotify"),
+        (r"bytedance", "ByteDance"),
+        (r"tencent", "Tencent"),
+        (r"alibaba", "Alibaba"),
     ]
 
     # Topic classification patterns
@@ -84,6 +173,9 @@ class MetadataExtractor:
         (r"\bsql\b", "sql"),
         (r"system\s*design", "system_design"),
         (r"behavioral|leadership|lp", "behavioral"),
+        (r"llm|rag|agent|prompt|eval|fine[- ]?tuning|reinforcement|diffusion|transformer", "ai_ml"),
+        (r"machine\s*learning|deep\s*learning|nlp|cv|computer\s*vision", "ai_ml"),
+        (r"inference|gpu|hardware|cuda|distributed|serving", "infrastructure"),
         (r"\bdsa\b|data\s*structure|algorithm|stacks|queues|linked\s*list|tree|graph|sort|search|dynamic\s*programming", "dsa"),
         (r"interview\s*guide|prepare|preparation|revision", "interview_prep"),
         (r"leetcode|leet\s*code", "dsa"),
@@ -114,7 +206,7 @@ class MetadataExtractor:
             DocumentMetadata with inferred company, topic, tags, etc.
         """
         normalized_name = self._normalize_unicode(filename)
-        company = self._extract_company(normalized_name)
+        company = self._extract_company(normalized_name, text)
         topic = self._extract_topic(normalized_name, text)
         difficulty = self._extract_difficulty(text) if text else "mixed"
         source_type = self._extract_source_type(normalized_name)
@@ -160,15 +252,28 @@ class MetadataExtractor:
                 result.append(normalized)
         return "".join(result)
 
-    def _extract_company(self, filename: str) -> str:
-        """Infer the company name from the filename.
+    def _extract_company(self, filename: str, text: str = "") -> str:
+        """Infer the company name from the filename or document content.
 
-        Uses ordered regex patterns. Falls back to 'General' for
-        documents not clearly associated with a company.
+        Uses content headers, structured filename patterns, and ordered regex patterns.
+        Falls back to 'General' for documents not clearly associated with a company.
         """
+        # 1. Check markdown H1 title: "# {Company} — Company-Specific Interview Intelligence"
+        if text:
+            header_match = re.search(r"^#\s+([A-Za-z0-9\s&.]+?)\s+[—-]\s+Company-Specific Interview Intelligence", text, re.MULTILINE)
+            if header_match:
+                raw_company = header_match.group(1).strip()
+                return self.COMPANY_ALIASES.get(raw_company.lower(), raw_company)
+
+        # 2. Check filename pattern: "{Company}_interview_intelligence.md"
+        intel_match = re.match(r"^([A-Za-z0-9_]+)_interview_intelligence\.md$", filename, re.IGNORECASE)
+        if intel_match:
+            raw_company = intel_match.group(1).replace("_", " ").strip()
+            return self.COMPANY_ALIASES.get(raw_company.lower(), raw_company)
+
         name_lower = filename.lower()
 
-        # Check specific patterns in priority order
+        # 3. Check specific patterns in priority order
         for pattern, company in self.COMPANY_PATTERNS:
             if re.search(pattern, name_lower):
                 return company
@@ -211,6 +316,8 @@ class MetadataExtractor:
         """Classify the document source type."""
         name_lower = filename.lower()
 
+        if "interview_intelligence" in name_lower:
+            return "interview_intelligence"
         if "leetcode" in name_lower or "leet code" in name_lower:
             return "leetcode"
         if "tagged" in name_lower:
@@ -240,6 +347,9 @@ class MetadataExtractor:
         name_lower = filename.lower()
 
         # Add format/source tags
+        if "interview_intelligence" in name_lower:
+            tags.add("interview_intelligence")
+            tags.add("ai_interview_research")
         if "leetcode" in name_lower:
             tags.add("leetcode")
         if "tagged" in name_lower:
@@ -250,7 +360,7 @@ class MetadataExtractor:
             tags.add("multi_part")
 
         # Content-based tags
-        content_preview = text[:3000].lower() if text else ""
+        content_preview = text[:4000].lower() if text else ""
         content_tags = {
             "array": r"\barray\b",
             "string": r"\bstring\b",
@@ -268,6 +378,14 @@ class MetadataExtractor:
             "greedy": r"\bgreedy\b",
             "two_pointers": r"\btwo\s*pointer\b",
             "sliding_window": r"\bsliding\s*window\b",
+            "llm": r"\bllm\b|large language model",
+            "rag": r"\brag\b|retrieval[- ]augmented",
+            "agent": r"\bagent\b|agents|agentic",
+            "evaluation": r"\bevaluation\b|\beval\b",
+            "reliability": r"\breliability\b|\breliable\b",
+            "inference_optimization": r"\binference\b|optimization|serving|quantization|vllm|tensorrt",
+            "ai_safety": r"\bsafety\b|alignment|guardrails",
+            "system_design": r"system design|distributed system",
         }
         for tag, pattern in content_tags.items():
             if re.search(pattern, content_preview):

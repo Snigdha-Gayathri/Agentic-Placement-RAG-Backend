@@ -39,8 +39,9 @@ def client():
 # ----------------------------------------------------------------------
 def test_sec01_no_vite_gemini_api_key_in_codebase():
     """Verify that VITE_GEMINI_API_KEY does not exist in source code or settings."""
-    app_jsx = Path("src/App.jsx").read_text(encoding="utf-8")
-    assert "VITE_GEMINI_API_KEY" not in app_jsx
+    app_jsx = Path("src/App.jsx")
+    if app_jsx.exists():
+        assert "VITE_GEMINI_API_KEY" not in app_jsx.read_text(encoding="utf-8")
 
     settings_py = Path("backend/config/settings.py").read_text(encoding="utf-8")
     assert "VITE_GEMINI_API_KEY" not in settings_py

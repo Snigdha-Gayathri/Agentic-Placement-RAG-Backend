@@ -12,6 +12,15 @@ from .base import BaseReranker, RankedChunk, RerankingResult
 logger = logging.getLogger(__name__)
 
 
+import math
+
+def _sigmoid(x: float) -> float:
+    try:
+        return 1.0 / (1.0 + math.exp(-float(x)))
+    except OverflowError:
+        return 0.0 if x < 0 else 1.0
+
+
 class CrossEncoderReranker(BaseReranker):
     """Reranker using cross-encoder/ms-marco-MiniLM-L-6-v2."""
 
@@ -43,10 +52,10 @@ class CrossEncoderReranker(BaseReranker):
         if self._model:
             try:
                 scores = self._model.predict(pairs)
-                # Normalize cross encoder logits/scores roughly to [0, 1] via sigmoid or minmax
                 for orig_rank_0, (chunk, s) in enumerate(zip(chunks, scores)):
                     orig_rank = orig_rank_0 + 1
                     orig_score = getattr(chunk, "score", getattr(chunk, "similarity_score", 0.0))
+                    norm_score = _sigmoid(float(s))
                     ranked.append(
                         RankedChunk(
                             chunk_id=getattr(chunk, "chunk_id", str(orig_rank_0)),
@@ -57,6 +66,7 @@ class CrossEncoderReranker(BaseReranker):
                             original_rank=orig_rank,
                             new_rank=orig_rank,
                             rank_change=0,
+                            score=round(max(norm_score, float(orig_score)), 4),
                         )
                     )
                 ranked.sort(key=lambda x: x.cross_encoder_score, reverse=True)

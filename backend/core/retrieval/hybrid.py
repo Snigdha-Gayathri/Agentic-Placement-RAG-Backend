@@ -16,8 +16,8 @@ class HybridRetriever(BaseRetriever):
         self,
         dense_retriever: BaseRetriever,
         bm25_retriever: BaseRetriever,
-        dense_weight: float = 0.7,
-        sparse_weight: float = 0.3,
+        dense_weight: float = 0.5,
+        sparse_weight: float = 0.5,
         rrf_k: int = 60,
     ) -> None:
         self.dense_retriever = dense_retriever

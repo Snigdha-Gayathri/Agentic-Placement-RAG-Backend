@@ -95,11 +95,26 @@ class DriveSyncer:
 
             for item in items:
                 file_id = item["id"]
-                file_name = item["name"]
+                raw_file_name = item.get("name", "").strip()
+                safe_file_name = Path(raw_file_name).name
                 modified_time = item.get("modifiedTime", "")
-                
-                local_file_path = self._data_path / file_name
-                
+
+                if (
+                    not safe_file_name
+                    or safe_file_name in (".", "..")
+                    or not safe_file_name.lower().endswith(".pdf")
+                    or any(sep in raw_file_name for sep in ("/", "\\", ".."))
+                ):
+                    logger.warning("Skipping invalid or unsafe Drive filename: %r", raw_file_name)
+                    continue
+
+                local_file_path = (self._data_path / safe_file_name).resolve()
+                if not local_file_path.is_relative_to(self._data_path.resolve()):
+                    logger.error("Path traversal detected for Drive item %r, skipping.", raw_file_name)
+                    continue
+
+                file_name = safe_file_name
+
                 # Check if it's new or modified compared to our saved state
                 is_new = file_name not in state
                 is_modified = file_name in state and state[file_name] != modified_time

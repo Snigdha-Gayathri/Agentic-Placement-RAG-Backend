@@ -21,6 +21,11 @@ class RankedChunk:
     original_rank: int
     new_rank: int
     rank_change: int
+    score: float = 0.0
+
+    def __post_init__(self) -> None:
+        if not self.score:
+            self.score = self.cross_encoder_score or self.original_score
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -32,6 +37,7 @@ class RankedChunk:
             "original_rank": self.original_rank,
             "new_rank": self.new_rank,
             "rank_change": self.rank_change,
+            "score": self.score,
         }
 
 

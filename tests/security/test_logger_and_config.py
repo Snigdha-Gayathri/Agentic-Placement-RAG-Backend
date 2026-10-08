@@ -4,13 +4,13 @@ from security.config import load_config
 from security.logger import SecurityLogger
 
 
-def test_logger_redacts_secret(capsys) -> None:
+def test_logger_redacts_secret(caplog) -> None:
     logger = SecurityLogger()
-    logger.info("event_test", value="api_key=supersecretvalue")
-    captured = capsys.readouterr()
-    payload = json.loads(captured.err.strip() or captured.out.strip())
-    assert payload["event"] == "event_test"
-    assert "[REDACTED]" in payload["value"]
+    with caplog.at_level("INFO"):
+        logger.info("event_test", value="api_key=supersecretvalue")
+    assert "event_test" in caplog.text
+    assert "[REDACTED]" in caplog.text
+    assert "supersecretvalue" not in caplog.text
 
 
 def test_config_reads_env_values(monkeypatch) -> None:

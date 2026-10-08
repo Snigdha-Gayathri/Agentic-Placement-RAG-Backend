@@ -55,10 +55,8 @@ class GeminiLLM(BaseLLM):
 
         Retries up to 3 times with exponential backoff on transient errors.
         """
-        endpoint = (
-            f"{_GEMINI_BASE}/{self._model}:generateContent"
-            f"?key={self._api_key}"
-        )
+        endpoint = f"{_GEMINI_BASE}/{self._model}:generateContent"
+        headers = {"x-goog-api-key": self._api_key}
 
         payload: dict[str, Any] = {
             "systemInstruction": {"parts": [{"text": system_prompt}]},
@@ -76,7 +74,7 @@ class GeminiLLM(BaseLLM):
             t0 = time.perf_counter()
             try:
                 async with httpx.AsyncClient(timeout=_TIMEOUT_S) as client:
-                    response = await client.post(endpoint, json=payload)
+                    response = await client.post(endpoint, json=payload, headers=headers)
                 latency_ms = (time.perf_counter() - t0) * 1000.0
 
                 if response.status_code == 429 or response.status_code >= 500:
