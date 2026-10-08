@@ -2,11 +2,68 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
 
-from langgraph.graph import END, StateGraph
+try:
+    from langgraph.graph import END, StateGraph
+except (ImportError, ModuleNotFoundError):
+    END = "__end__"
+
+    class _FallbackCompiledGraph:
+        def __init__(self, nodes: dict, edges: dict, conditional_edges: dict, entry_point: str | None) -> None:
+            self.nodes = nodes
+            self.edges = edges
+            self.conditional_edges = conditional_edges
+            self.entry_point = entry_point
+
+        async def ainvoke(self, initial_state: dict) -> dict:
+            state = dict(initial_state)
+            current_node = self.entry_point
+            visited_count = 0
+            max_steps = 50
+
+            while current_node and current_node != END and visited_count < max_steps:
+                visited_count += 1
+                node_fn = self.nodes.get(current_node)
+                if node_fn:
+                    updates = await node_fn(state) if asyncio.iscoroutinefunction(node_fn) else node_fn(state)
+                    if isinstance(updates, dict):
+                        state.update(updates)
+
+                # Route to next node
+                if current_node in self.conditional_edges:
+                    router_fn, route_map = self.conditional_edges[current_node]
+                    route_key = await router_fn(state) if asyncio.iscoroutinefunction(router_fn) else router_fn(state)
+                    current_node = route_map.get(route_key, END)
+                else:
+                    current_node = self.edges.get(current_node, END)
+
+            return state
+
+    class StateGraph:
+        def __init__(self, state_schema: Any = None) -> None:
+            self.nodes: dict[str, Any] = {}
+            self.edges: dict[str, str] = {}
+            self.conditional_edges: dict[str, tuple[Any, dict[str, str]]] = {}
+            self.entry_point: str | None = None
+
+        def add_node(self, name: str, fn: Any) -> None:
+            self.nodes[name] = fn
+
+        def set_entry_point(self, name: str) -> None:
+            self.entry_point = name
+
+        def add_edge(self, start: str, end: str) -> None:
+            self.edges[start] = end
+
+        def add_conditional_edges(self, start: str, router_fn: Any, route_map: dict[str, str]) -> None:
+            self.conditional_edges[start] = (router_fn, route_map)
+
+        def compile(self) -> _FallbackCompiledGraph:
+            return _FallbackCompiledGraph(self.nodes, self.edges, self.conditional_edges, self.entry_point)
 
 from .planner import AgentPlanner, PlanStep
 from .state import AgenticRAGState
