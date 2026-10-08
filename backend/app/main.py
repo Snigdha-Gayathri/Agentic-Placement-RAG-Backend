@@ -29,8 +29,6 @@ from .models import (
     SecurityStatusResponse,
 )
 from .service import DASHBOARD_STORE, SESSION_HISTORY, TRACKER_STORE, SecureRAGService, build_request_context
-from backend.evaluation.ablation_runner import AblationRunner
-from backend.evaluation.benchmark_dataset import get_benchmark_dataset
 
 app = FastAPI(title="Placement RAG Agent Secure & Observable API", version="2.5.0")
 
@@ -55,7 +53,18 @@ else:
     )
 
 service = SecureRAGService()
-ablation_runner = AblationRunner(service)
+
+# Lazy ablation runner cache to keep benchmark dataset out of production memory
+_ablation_runner = None
+
+
+def get_ablation_runner() -> Any:
+    """Lazily load ablation runner only when the evaluation endpoint is explicitly called."""
+    global _ablation_runner
+    if _ablation_runner is None:
+        from backend.evaluation.ablation_runner import AblationRunner
+        _ablation_runner = AblationRunner(service)
+    return _ablation_runner
 
 
 class DynamicThresholdConfig(BaseModel):
@@ -165,6 +174,7 @@ async def chat_stream(
 @app.get("/pipeline-status/{request_id}")
 async def pipeline_status(
     request_id: str,
+    raw_request: Request,
     auth: AuthContext = Depends(require_user),
 ) -> StreamingResponse:
     """Server-Sent Events (SSE) streaming live RAG pipeline progress stages."""
@@ -176,17 +186,31 @@ async def pipeline_status(
             return
 
         last_count = 0
-        while True:
+        ticks = 0
+        max_ticks = 200  # 30 seconds maximum lifespan to prevent leaked streaming loops
+        while ticks < max_ticks:
+            ticks += 1
+            if await raw_request.is_disconnected():
+                break
+
             stages = [s.to_dict() for s in tracker.get_stages()]
             if len(stages) != last_count or any(s["status"] == "running" for s in stages):
                 payload = json.dumps({"request_id": request_id, "stages": stages})
                 yield f"data: {payload}\n\n"
                 last_count = len(stages)
-            if any(s["name"] == "response_complete" and s["status"] == "completed" for s in stages):
+            if any(s["name"] == "response_complete" and s["status"] in ("completed", "failed") for s in stages):
                 break
             await asyncio.sleep(0.15)
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/dashboard/{request_id}")
@@ -288,13 +312,15 @@ async def get_dashboard_aggregate(auth: AuthContext = Depends(require_user)) -> 
 @app.post("/api/evaluation/ablation")
 async def run_ablation(sample_size: int = 15, auth: AuthContext = Depends(require_user)) -> list[dict[str, Any]]:
     """Run full 6-configuration ablation study against the benchmark dataset."""
-    return await ablation_runner.run_ablation_study(sample_size=sample_size)
+    runner = get_ablation_runner()
+    return await runner.run_ablation_study(sample_size=sample_size)
 
 
 @app.post("/api/evaluation/run")
 async def run_evaluation_custom(req: CustomEvaluationRequest, auth: AuthContext = Depends(require_user)) -> dict[str, Any]:
     """Run custom configuration benchmark against the benchmark dataset."""
-    return await ablation_runner.evaluate_custom_config(
+    runner = get_ablation_runner()
+    return await runner.evaluate_custom_config(
         config_name=req.config_name,
         toggles=req.toggles,
         numeric_params=req.numeric_params,
@@ -364,9 +390,10 @@ async def api_chat(
 @app.get("/api/pipeline-status/{request_id}")
 async def api_pipeline_status(
     request_id: str,
+    raw_request: Request,
     auth: AuthContext = Depends(require_user),
 ) -> StreamingResponse:
-    return await pipeline_status(request_id, auth=auth)
+    return await pipeline_status(request_id, raw_request=raw_request, auth=auth)
 
 
 @app.get("/api/dashboard/{request_id}")

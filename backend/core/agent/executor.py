@@ -255,13 +255,26 @@ class AgentExecutor:
             chunk_count=len(final_state.get("final_context_chunks", [])),
         )
 
+        pruned_state = {
+            "retrieval_plan": final_state.get("retrieval_plan", []),
+            "executed_operations": final_state.get("executed_operations", []),
+            "skipped_operations": final_state.get("skipped_operations", []),
+            "decision_flow": final_state.get("decision_flow", []),
+            "decision_metadata": final_state.get("decision_metadata", {}),
+            "rank_movements": final_state.get("rank_movements", []),
+            "rrf_details": final_state.get("rrf_details", {}),
+            "budgets": final_state.get("budgets", {}),
+            "candidate_count_before_reranking": final_state.get("candidate_count_before_reranking", 0),
+            "candidate_count_after_reranking": final_state.get("candidate_count_after_reranking", 0),
+        }
+
         return AgentExecutionResult(
             chunks=final_state.get("final_context_chunks", []),
             trace=trace,
             hops=hops,
             sufficiency=sufficiency,
             total_latency_ms=total_lat,
-            state=final_state,
+            state=pruned_state,
             answer=final_state.get("generated_answer", ""),
             disclosure=final_state.get("answer_disclosure", ""),
             decision_metadata=final_state.get("decision_metadata", {}),

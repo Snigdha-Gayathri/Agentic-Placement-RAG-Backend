@@ -87,7 +87,7 @@ logger = logging.getLogger(__name__)
 class TrackerStore:
     """Thread-safe bounded in-memory store for PipelineTracker instances."""
 
-    def __init__(self, max_size: int = 500) -> None:
+    def __init__(self, max_size: int = 50) -> None:
         self._store: dict[str, PipelineTracker] = {}
         self._order: list[str] = []
         self._max_size = max_size
@@ -547,11 +547,17 @@ class SecureRAGService:
             pipeline_data=pdata,
         )
 
-    async def process(self, request: ChatRequest, ctx: RequestContext) -> ChatResponse:
+    async def process(
+        self,
+        request: ChatRequest,
+        ctx: RequestContext,
+        tracker: PipelineTracker | None = None,
+    ) -> ChatResponse:
         """Non-streaming query execution."""
         started = time.perf_counter()
-        tracker = PipelineTracker(request_id=ctx.request_id)
-        TRACKER_STORE[ctx.request_id] = tracker
+        if tracker is None:
+            tracker = PipelineTracker(request_id=ctx.request_id)
+            TRACKER_STORE[ctx.request_id] = tracker
         toggles = self.get_feature_toggles()
         if getattr(request, "toggles", None):
             toggles.update(request.toggles)
@@ -782,13 +788,20 @@ class SecureRAGService:
         reranker_top_n = self.dynamic_params.get("reranker_top_n", 8)
 
         if toggles.get("cross_encoder_reranking") and candidate_chunks:
-            rerank_res = self.reranker.rerank(
-                standalone_query,
-                candidate_chunks,
-                top_k=reranker_top_n,
+            # Avoid redundant re-ranking pass if LangGraph agent executor already reranked
+            already_reranked = any(
+                hasattr(c, "cross_encoder_score") and getattr(c, "cross_encoder_score", None) is not None
+                for c in candidate_chunks
             )
-
-            candidate_chunks = rerank_res.chunks
+            if not already_reranked:
+                rerank_res = self.reranker.rerank(
+                    standalone_query,
+                    candidate_chunks,
+                    top_k=reranker_top_n,
+                )
+                candidate_chunks = rerank_res.chunks
+            else:
+                candidate_chunks = candidate_chunks[:reranker_top_n]
 
             for idx, rc in enumerate(candidate_chunks):
                 cid = getattr(rc, "chunk_id", str(idx))
@@ -1448,8 +1461,8 @@ class SecureRAGService:
             "message": "Security checks passed",
         }
 
-        # Run process logic to get fully prepared response
-        full_resp = await self.process(request, ctx)
+        # Run process logic with shared tracker to prevent orphaned SSE listeners
+        full_resp = await self.process(request, ctx, tracker=tracker)
 
         # Stream progressive answer tokens
         words = full_resp.answer.split(" ")

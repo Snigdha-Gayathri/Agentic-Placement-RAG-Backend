@@ -1,8 +1,12 @@
-"""Cross-encoder reranker using sentence-transformers."""
+"""Cross-encoder reranker using sentence-transformers with memory-constrained lifecycle."""
 
 from __future__ import annotations
 
+import gc
 import logging
+import math
+import os
+import threading
 import time
 from typing import Any
 
@@ -11,8 +15,9 @@ from .base import BaseReranker, RankedChunk, RerankingResult
 
 logger = logging.getLogger(__name__)
 
+_SHARED_CROSS_ENCODER: Any = None
+_SHARED_CROSS_ENCODER_LOCK = threading.Lock()
 
-import math
 
 def _sigmoid(x: float) -> float:
     try:
@@ -22,22 +27,59 @@ def _sigmoid(x: float) -> float:
 
 
 class CrossEncoderReranker(BaseReranker):
-    """Reranker using cross-encoder/ms-marco-MiniLM-L-6-v2."""
+    """Memory-optimized reranker using cross-encoder/ms-marco-MiniLM-L-6-v2."""
 
     def __init__(self, model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2") -> None:
         self.model_name = model_name
-        self._model = None
-        self._init_model()
 
-    def _init_model(self) -> None:
-        try:
-            from sentence_transformers import CrossEncoder
+    def _get_model(self) -> Any:
+        """Lazily load shared CrossEncoder singleton with strictly bounded thread and RAM footprint."""
+        global _SHARED_CROSS_ENCODER
+        if _SHARED_CROSS_ENCODER is not None:
+            return _SHARED_CROSS_ENCODER if _SHARED_CROSS_ENCODER is not False else None
 
-            self._model = CrossEncoder(self.model_name)
-            logger.info("Loaded CrossEncoder model: %s", self.model_name)
-        except Exception as exc:
-            logger.warning("Could not initialize CrossEncoder (%s): %s. Will fallback to original score.", self.model_name, exc)
-            self._model = None
+        low_mem_env = os.getenv("RERANKER_LOW_MEMORY", "").strip().lower()
+        if low_mem_env in ("1", "true", "yes", "on"):
+            logger.info("RERANKER_LOW_MEMORY is enabled; using zero-memory calibrated ranking fallback.")
+            with _SHARED_CROSS_ENCODER_LOCK:
+                _SHARED_CROSS_ENCODER = False
+            return None
+
+        with _SHARED_CROSS_ENCODER_LOCK:
+            if _SHARED_CROSS_ENCODER is not None:
+                return _SHARED_CROSS_ENCODER if _SHARED_CROSS_ENCODER is not False else None
+
+            try:
+                # Constrain PyTorch thread pools to prevent multithread memory explosions
+                os.environ["OMP_NUM_THREADS"] = "1"
+                os.environ["MKL_NUM_THREADS"] = "1"
+                os.environ["OPENBLAS_NUM_THREADS"] = "1"
+                os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+                import torch
+                torch.set_num_threads(1)
+                torch.set_num_interop_threads(1)
+                torch.set_grad_enabled(False)
+
+                from sentence_transformers import CrossEncoder
+
+                logger.info("Initializing shared CrossEncoder: %s (CPU, single-thread, max_length=128)", self.model_name)
+                _SHARED_CROSS_ENCODER = CrossEncoder(
+                    self.model_name,
+                    device="cpu",
+                    max_length=128,
+                    model_kwargs={"low_cpu_mem_usage": True},
+                )
+                logger.info("Successfully loaded shared CrossEncoder model: %s", self.model_name)
+            except Exception as exc:
+                logger.warning(
+                    "Could not initialize CrossEncoder (%s): %s. Will fallback to calibrated rank scoring.",
+                    self.model_name,
+                    exc,
+                )
+                _SHARED_CROSS_ENCODER = False
+
+        return _SHARED_CROSS_ENCODER if _SHARED_CROSS_ENCODER is not False else None
 
     def rerank(
         self, query: str, chunks: list[ScoredChunk], top_k: int = 5
@@ -46,12 +88,17 @@ class CrossEncoderReranker(BaseReranker):
         if not chunks:
             return RerankingResult(chunks=[], latency_ms=0.0)
 
-        pairs = [[query, c.text] for c in chunks]
+        model = self._get_model()
         ranked: list[RankedChunk] = []
 
-        if self._model:
+        if model:
             try:
-                scores = self._model.predict(pairs)
+                import torch
+                # Truncate text pairs to bounded size for fast evaluation & minimal tensor RAM
+                pairs = [[query, getattr(c, "text", str(c))[:300]] for c in chunks]
+                with torch.inference_mode():
+                    scores = model.predict(pairs, batch_size=4, show_progress_bar=False)
+
                 for orig_rank_0, (chunk, s) in enumerate(zip(chunks, scores)):
                     orig_rank = orig_rank_0 + 1
                     orig_score = getattr(chunk, "score", getattr(chunk, "similarity_score", 0.0))
@@ -70,8 +117,9 @@ class CrossEncoderReranker(BaseReranker):
                         )
                     )
                 ranked.sort(key=lambda x: x.cross_encoder_score, reverse=True)
+                gc.collect()
             except Exception as exc:
-                logger.warning("Error predicting cross-encoder scores: %s", exc)
+                logger.warning("Error predicting cross-encoder scores: %s. Falling back to calibrated rank scoring.", exc)
                 ranked = self._fallback_rank(chunks)
         else:
             ranked = self._fallback_rank(chunks)
@@ -99,3 +147,4 @@ class CrossEncoderReranker(BaseReranker):
             )
             for i, c in enumerate(chunks)
         ]
+

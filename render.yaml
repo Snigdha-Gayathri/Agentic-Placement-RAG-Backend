@@ -28,6 +28,14 @@ services:
         value: "0.45"
       - key: PROMPT_INJECTION_THRESHOLD
         value: "0.65"
+      - key: OMP_NUM_THREADS
+        value: "1"
+      - key: MKL_NUM_THREADS
+        value: "1"
+      - key: TOKENIZERS_PARALLELISM
+        value: "false"
+      - key: PYTHONUNBUFFERED
+        value: "1"
 
   - type: web
     name: placement-rag-agent-ui

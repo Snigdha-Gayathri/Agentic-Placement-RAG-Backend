@@ -42,6 +42,10 @@ class RetrievedChunkInfo:
     was_rejected: bool = False
     rejection_reason: str = ""
 
+    def __post_init__(self) -> None:
+        if self.text and len(self.text) > 300:
+            self.text = self.text[:300] + "..."
+
 
 @dataclass
 class RetrievalInfo:
@@ -100,6 +104,14 @@ class GenerationInfo:
     time_to_first_token_ms: float = 0.0
     throughput_tokens_per_sec: float = 0.0
     streamed_chunks_count: int = 0
+
+    def __post_init__(self) -> None:
+        if self.user_prompt and len(self.user_prompt) > 500:
+            self.user_prompt = self.user_prompt[:500] + "..."
+        if self.system_prompt and len(self.system_prompt) > 300:
+            self.system_prompt = self.system_prompt[:300] + "..."
+        if self.raw_response and len(self.raw_response) > 2000:
+            self.raw_response = self.raw_response[:2000] + "..."
 
 
 @dataclass
@@ -312,7 +324,7 @@ class DashboardData:
 class SessionHistoryStore:
     """Thread-safe rolling query history and real-time aggregate statistics engine."""
 
-    def __init__(self, max_history: int = 100) -> None:
+    def __init__(self, max_history: int = 25) -> None:
         self.max_history = max_history
         self._history: list[DashboardData] = []
         self._lock = threading.RLock()
@@ -543,7 +555,7 @@ class SessionHistoryStore:
 class DashboardStore:
     """Thread-safe bounded in-memory store for individual dashboard requests."""
 
-    def __init__(self, max_size: int = 500) -> None:
+    def __init__(self, max_size: int = 50) -> None:
         self._store: dict[str, DashboardData] = {}
         self._order: list[str] = []
         self._max_size = max_size
