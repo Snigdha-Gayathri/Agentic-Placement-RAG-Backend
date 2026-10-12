@@ -353,15 +353,15 @@ class DecomposeQueryTool:
                 else:
                     subqueries.append(f"{comp} technical interview questions process format")
 
-        # 2. Decompose by behavioral example + leadership principle + evaluation criteria
-        elif ("disagree" in lower or "behavioral" in lower) and ("principle" in lower or "evaluation" in lower):
+        # 2. Decompose by behavioral conflict/disagreement + leadership principle evaluation
+        elif "disagree" in lower and ("principle" in lower or "evaluation" in lower):
             comp_prefix = f"{detected_companies[0]} " if detected_companies else "Amazon "
             subqueries.append(f"{comp_prefix}behavioral questions disagreement with manager coworker")
             subqueries.append(f"{comp_prefix}leadership principles demonstrate disagree and commit ownership")
             subqueries.append(f"{comp_prefix}behavioral interview evaluation criteria rubric expected answer")
 
         # 3. Decompose by multiple interview rounds
-        elif "round" in lower or "stage" in lower or "interview process" in lower:
+        elif ("round 1" in lower and "round 2" in lower) or ("screening" in lower and "onsite" in lower):
             comp_prefix = f"{detected_companies[0]} " if detected_companies else ""
             if "round 1" in lower or "oa" in lower or "online assessment" in lower or "screening" in lower:
                 subqueries.append(f"{comp_prefix}round 1 online assessment screening coding questions")
@@ -474,7 +474,21 @@ class EvaluateEvidenceTool:
         covered_words = {w for w in q_words if w in all_text}
         coverage_ratio = len(covered_words) / max(1, len(q_words))
 
-        if coverage_ratio < 0.20 and max_score < 0.08:
+        # Check topic alignment (prevent topic hallucination: e.g. behavioral query getting pure DSA chunks)
+        behavioral_cues = {"behavioral", "leadership principle", "leadership principles", "star method", "customer obsession", "ownership", "bias for action", "bar raiser"}
+        query_is_behavioral = any(b in query.lower() for b in behavioral_cues)
+        chunks_have_behavioral = any(
+            any(b in getattr(c, "text", str(c)).lower() for b in behavioral_cues)
+            or "behavioral" in str(getattr(c, "metadata", {})).lower()
+            for c in chunks
+        )
+
+        if query_is_behavioral and not chunks_have_behavioral:
+            status = "INSUFFICIENT"
+            is_sufficient = False
+            reasons.append("Retrieved chunks contain technical coding/DSA problems but no behavioral or Leadership Principle evidence.")
+            missing_aspects.append("Behavioral interview questions and Leadership Principle rubrics")
+        elif coverage_ratio < 0.20 and max_score < 0.08:
             status = "INSUFFICIENT"
             is_sufficient = False
             reasons.append(f"Low relevance score ({max_score:.2f}) and minimal query term overlap ({coverage_ratio:.0%}).")

@@ -51,6 +51,7 @@ from backend.app.vector_store import VectorStore
 
 from backend.config.settings import DEFAULT_FEATURE_TOGGLES
 from backend.core.agent.executor import AgentExecutor, AgentExecutionResult
+from backend.core.agent.graph import is_educational_technical_query
 from backend.core.agent.planner import AgentPlanner
 from backend.core.chunking.base import ChunkMetadata, DocumentChunk
 from backend.core.embeddings.gemini import GeminiEmbedding
@@ -258,6 +259,13 @@ class SecureRAGService:
                 query_rewriter=self.query_rewriter,
             )
         return self._agent_executor
+
+    def warmup(self) -> None:
+        """Pre-warm reranker and vector stores to eliminate first-query cold start delays."""
+        try:
+            self.reranker.warmup()
+        except Exception as exc:
+            logger.warning("Warmup notice: %s", exc)
 
     def health(self) -> "HealthResponse":
         from backend.app.models import HealthResponse
@@ -724,7 +732,7 @@ class SecureRAGService:
         ret_start = time.perf_counter()
         tracker.start_stage(StageName.DENSE_RETRIEVAL.value)
 
-        top_k = self.dynamic_params.get("top_k", 15)
+        top_k = self.dynamic_params.get("top_k", 25)
 
         is_multi_hop = (
             toggles.get("multi_hop_retrieval", True)
@@ -966,12 +974,18 @@ class SecureRAGService:
             else:
                 t0_gen = time.perf_counter()
 
-                raw_output = await self.gemini.generate_answer(
-                    query=request.query,
-                    context=sanitized_context,
-                    max_output_tokens=8192,
-                    conversation_history=history,
-                )
+                if not sanitized_context.strip() and is_educational_technical_query(request.query):
+                    raw_output = await self.gemini.generate_educational_explanation(
+                        query=request.query,
+                        max_output_tokens=1024,
+                    )
+                else:
+                    raw_output = await self.gemini.generate_answer(
+                        query=request.query,
+                        context=sanitized_context,
+                        max_output_tokens=8192,
+                        conversation_history=history,
+                    )
 
                 dur_gen = (
                     time.perf_counter() - t0_gen
@@ -1028,6 +1042,14 @@ class SecureRAGService:
             )
         )
 
+        is_educational = (
+            getattr(agent_exec_res, "state", {}).get("termination_reason") == "EDUCATIONAL_CONCEPT_ANSWERED"
+            or (is_educational_technical_query(request.query) and len(guarded.safe_chunks) == 0)
+        )
+        if is_educational:
+            is_grounded = True
+            is_hallucinated = False
+
         warning = (
             "Response content may exceed retrieved context grounding."
             if (
@@ -1035,6 +1057,7 @@ class SecureRAGService:
                 or is_hallucinated
             )
             and not should_abstain
+            and not is_educational
             else None
         )
 

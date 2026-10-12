@@ -88,13 +88,25 @@ class ChromaVectorStore(BaseVectorStore):
         query_embedding: list[float],
         top_k: int = 10,
         metadata_filters: dict[str, Any] | None = None,
+        fallback_unfiltered: bool = True,
     ) -> list[ScoredChunk]:
         if not self._collection:
             return []
         where_filter = None
+        valid_filters = {}
         if metadata_filters:
-            valid_filters = {k: v for k, v in metadata_filters.items() if v}
-            if len(valid_filters) == 1:
+            for k, v in metadata_filters.items():
+                if not v:
+                    continue
+                # Normalize canonical role aliases to ChromaDB stored metadata schema ('SDE')
+                if k == "role" and str(v).strip().lower() in ("software development engineer", "sde", "swe", "software engineer", "sde 1", "sde 2", "sde i", "sde ii"):
+                    valid_filters[k] = "SDE"
+                else:
+                    valid_filters[k] = v
+
+            if "company" in valid_filters:
+                where_filter = {"company": valid_filters["company"]}
+            elif len(valid_filters) == 1:
                 k, v = next(iter(valid_filters.items()))
                 where_filter = {k: v}
             elif len(valid_filters) > 1:
@@ -115,8 +127,31 @@ class ChromaVectorStore(BaseVectorStore):
                 include=["documents", "metadatas", "distances"],
             )
 
-        scored = []
         docs = results.get("documents", [[]])[0]
+        # Hierarchical fallback: try company-only filter before going completely unfiltered
+        if where_filter and (not docs or len(docs) == 0) and fallback_unfiltered:
+            if "company" in valid_filters and len(valid_filters) > 1:
+                logger.info("Chroma search with compound filter %r returned 0 results; falling back to company filter.", where_filter)
+                try:
+                    results = self._collection.query(
+                        query_embeddings=[query_embedding],
+                        n_results=top_k,
+                        where={"company": valid_filters["company"]},
+                        include=["documents", "metadatas", "distances"],
+                    )
+                    docs = results.get("documents", [[]])[0]
+                except Exception:
+                    pass
+            if not docs or len(docs) == 0:
+                logger.info("Chroma search with filter %r returned 0 results; falling back to unfiltered search.", where_filter)
+                results = self._collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=top_k,
+                    include=["documents", "metadatas", "distances"],
+                )
+                docs = results.get("documents", [[]])[0]
+
+        scored = []
         metas = results.get("metadatas", [[]])[0]
         dists = results.get("distances", [[]])[0]
         ids = results.get("ids", [[]])[0]
@@ -132,16 +167,30 @@ class ChromaVectorStore(BaseVectorStore):
                     score=sim,
                 )
             )
+
         if metadata_filters:
             filtered_scored = []
+            sde_aliases = {"sde", "swe", "software development engineer", "software engineer", "sde-2", "sde 1", "sde i", "sde ii"}
             for sc in scored:
-                match = all(
-                    str(sc.metadata.get(k, "")).strip().lower() == str(v).strip().lower()
-                    for k, v in metadata_filters.items() if v
-                )
+                def _val_match(k: str, target_v: Any) -> bool:
+                    actual_v = str(sc.metadata.get(k, "")).strip().lower()
+                    tv = str(target_v).strip().lower()
+                    if actual_v == tv:
+                        return True
+                    if k == "role" and actual_v in sde_aliases and tv in sde_aliases:
+                        return True
+                    return False
+
+                match = all(_val_match(k, v) for k, v in metadata_filters.items() if v)
                 if match:
                     filtered_scored.append(sc)
-            scored = filtered_scored
+            if filtered_scored:
+                scored = filtered_scored
+            elif fallback_unfiltered:
+                logger.info("Chroma post-filter %r yielded 0 hits; retaining unfiltered candidates.", metadata_filters)
+            else:
+                scored = []
+
         return scored
 
     def get_all_chunks(self) -> list[ScoredChunk]:

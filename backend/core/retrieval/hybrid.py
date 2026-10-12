@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
 from backend.core.vector_store.base import ScoredChunk
 from .base import BaseRetriever, RetrievalResult
+
+logger = logging.getLogger(__name__)
 
 
 class HybridRetriever(BaseRetriever):
@@ -31,6 +34,7 @@ class HybridRetriever(BaseRetriever):
         query: str,
         top_k: int = 10,
         metadata_filters: dict[str, Any] | None = None,
+        fallback_unfiltered: bool = True,
     ) -> RetrievalResult:
         start_t = time.perf_counter()
         dense_res = await self.dense_retriever.retrieve(
@@ -77,21 +81,51 @@ class HybridRetriever(BaseRetriever):
                 )
             )
 
+        fallback_occurred = False
         if metadata_filters:
             filtered_fused = []
+            sde_aliases = {"sde", "swe", "software development engineer", "software engineer", "sde-2", "sde 1", "sde i", "sde ii"}
+            target_comp = str(metadata_filters.get("company", "")).strip().lower()
             for fc in fused_chunks:
-                match = all(
-                    str(fc.metadata.get(k, "")).strip().lower() == str(v).strip().lower()
-                    for k, v in metadata_filters.items() if v
-                )
-                if match:
+                fc_comp = str(fc.metadata.get("company", "")).strip().lower()
+                def _fc_match(k: str, target_v: Any) -> bool:
+                    actual_v = str(fc.metadata.get(k, "")).strip().lower()
+                    tv = str(target_v).strip().lower()
+                    if actual_v == tv:
+                        return True
+                    if k == "role" and actual_v in sde_aliases and tv in sde_aliases:
+                        return True
+                    return False
+
+                if all(_fc_match(k, v) for k, v in metadata_filters.items() if v):
                     filtered_fused.append(fc)
-            fused_chunks = filtered_fused
+                elif target_comp and fc_comp == target_comp:
+                    filtered_fused.append(fc)
+            if filtered_fused:
+                fused_chunks = filtered_fused
+            elif "company" in metadata_filters and metadata_filters["company"]:
+                # Fallback to company-only filter
+                comp_fused = [
+                    fc for fc in fused_chunks
+                    if str(fc.metadata.get("company", "")).strip().lower() == str(metadata_filters["company"]).strip().lower()
+                ]
+                if comp_fused:
+                    fused_chunks = comp_fused
+                elif fallback_unfiltered:
+                    fallback_occurred = True
+                    logger.info("Hybrid fused post-filter %r yielded 0 hits; falling back to unfiltered fused candidates.", metadata_filters)
+                else:
+                    fused_chunks = []
+            elif fallback_unfiltered:
+                fallback_occurred = True
+                logger.info("Hybrid fused post-filter %r yielded 0 hits; falling back to unfiltered fused candidates.", metadata_filters)
+            else:
+                fused_chunks = []
 
         latency_ms = round((time.perf_counter() - start_t) * 1000, 2)
         return RetrievalResult(
             chunks=fused_chunks,
             retriever_type="hybrid",
             latency_ms=latency_ms,
-            metadata_filters_applied=metadata_filters,
+            metadata_filters_applied=metadata_filters if not fallback_occurred else None,
         )

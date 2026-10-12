@@ -65,6 +65,7 @@ class BaseVectorStore(abc.ABC):
         query_embedding: list[float],
         top_k: int = 10,
         metadata_filters: dict[str, Any] | None = None,
+        fallback_unfiltered: bool = True,
     ) -> list[ScoredChunk]:
         """Search the vector store by dense embedding similarity."""
         ...

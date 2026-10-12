@@ -459,22 +459,6 @@ class JevDecisionBackend(DecisionBackend):
         """Use Jev to evaluate whether retrieved chunks contain sufficient support for answer."""
         t0 = time.perf_counter()
 
-        # If target company is unindexed (e.g. Figma, Kroger, Notion) and chunks are empty,
-        # preserve fail-safe unsupported detection
-        if target_company and not chunks:
-            return SufficiencyDecision(
-                is_sufficient=False,
-                status="UNSUPPORTED",
-                score=0.0,
-                confidence=1.0,
-                probabilities={"insufficient": 1.0, "sufficient": 0.0},
-                missing_aspects=[f"Verified interview records for {target_company}"],
-                reasons=[f"Company '{target_company}' is not indexed in the knowledge base."],
-                backend="jev",
-                latency_ms=round((time.perf_counter() - t0) * 1000, 2),
-                fallback_occurred=False,
-            )
-
         if not self.is_configured:
             fb = await self.fallback.evaluate_evidence_sufficiency(
                 query=query, chunks=chunks, target_company=target_company, query_id=query_id
@@ -512,6 +496,43 @@ class JevDecisionBackend(DecisionBackend):
             fb.confidence = 0.0
             fb.probabilities = {}
             return fb
+
+        # If target company is unindexed or retrieved chunks contain no records for target company
+        if target_company:
+            comp_chunks = []
+            for c in chunks:
+                raw_m = getattr(c, "metadata", None)
+                if hasattr(raw_m, "company"):
+                    c_comp = raw_m.company
+                elif isinstance(raw_m, dict):
+                    c_comp = raw_m.get("company", "")
+                else:
+                    c_comp = getattr(c, "company", "")
+
+                tc_lower = target_company.strip().lower()
+                c_text = str(getattr(c, "text", "")).lower()
+                c_src = str(getattr(c, "source", "")).lower()
+                if (
+                    str(c_comp).strip().lower() == tc_lower
+                    or tc_lower in c_src
+                    or tc_lower in c_text
+                ):
+                    comp_chunks.append(c)
+
+            if not comp_chunks:
+                return SufficiencyDecision(
+                    is_sufficient=False,
+                    status="UNSUPPORTED",
+                    score=0.0,
+                    confidence=1.0,
+                    probabilities={"insufficient": 1.0, "sufficient": 0.0},
+                    missing_aspects=[f"Verified interview records for {target_company}"],
+                    reasons=[f"Company '{target_company}' is not indexed in the knowledge base."],
+                    backend="jev",
+                    requested_backend="jev",
+                    latency_ms=round((time.perf_counter() - t0) * 1000, 2),
+                    fallback_occurred=False,
+                )
 
         from typesafe_sdk import Choice
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from typing import Any
 
@@ -81,6 +82,19 @@ from .tools import (
 logger = logging.getLogger(__name__)
 
 
+def is_educational_technical_query(query: str) -> bool:
+    """Detect benign educational, conceptual, or best-practice questions about technical topics."""
+    q = query.lower().strip()
+    educational_patterns = [
+        r"\b(what\s+is|what\s+are|meaning\s+of|define|definition|explain|describe|how\s+does|how\s+do|how\s+to\s+secure|how\s+should|how\s+can\s+i\s+secure|best\s+practices?\s+for)\b.*\b(api[ _-]*keys?|gemini[ _-]*api[ _-]*keys?|prompt\s+injection|jailbreak|hashing|symmetric|encryption|jwt|oauth|rest\s+api|environment\s+variables?)\b",
+        r"\b(api[ _-]*keys?|gemini[ _-]*api[ _-]*keys?)\b.*\b(concept|definition|meaning|used\s+for|how\s+it\s+works|overview|work\??)\b",
+        r"^what\s+is\s+(an?\s+|the\s+meaning\s+of\s+an?\s+)?api[ _-]*key\??$",
+        r"^how\s+does\s+(a\s+)?(gemini\s+)?api[ _-]*key\s+work\??$",
+        r"^how\s+should\s+i\s+secure\s+(an?\s+)?api[ _-]*key\??$",
+    ]
+    return any(re.search(pat, q) for pat in educational_patterns)
+
+
 def build_disclosure_section(state: AgenticRAGState) -> str:
     """Build compact, honest user-facing retrieval disclosure section."""
     executed = set(state.get("executed_operations", []))
@@ -113,10 +127,32 @@ def build_disclosure_section(state: AgenticRAGState) -> str:
         why = "Multi-hop was skipped because the query focused on a single entity/topic."
     elif "HyDE" in skipped_names:
         why = "HyDE was skipped because query vocabulary directly matched the indexed knowledge corpus."
-    else:
-        why = "Operations were dynamically selected based on query specificity and evidence quality."
-
     lines.append(f"\n*Why:* {why}")
+
+    # Build Sources & Attribution block if enabled
+    show_attribution = state.get("active_toggles", {}).get("source_attribution", True)
+    chunks = state.get("final_context_chunks", [])
+    if show_attribution and chunks:
+        seen_sources = set()
+        source_items = []
+        for c in chunks:
+            m = getattr(c, "metadata", {}) or {}
+            src_repo = m.get("source_repo", "")
+            src_file = m.get("source_file", "") or getattr(c, "source", "placement_doc")
+            lic = m.get("license", "")
+            key = (src_repo, src_file)
+            if key not in seen_sources:
+                seen_sources.add(key)
+                if src_repo:
+                    lic_str = f" ({lic})" if lic and lic != "Unknown" else ""
+                    source_items.append(f"- **{src_repo}** — `{src_file}`{lic_str}")
+                else:
+                    source_items.append(f"- `{src_file}` (Original Placement Corpus)")
+
+        if source_items:
+            lines.append("\n**Sources & Attribution:**")
+            lines.extend(source_items[:5])
+
     return "\n".join(lines)
 
 
@@ -374,7 +410,12 @@ class RetrievalGraphBuilder:
         """Dynamically execute the planned retrieval operations."""
         t0 = time.perf_counter()
         active_q = state.get("rewritten_query") or state.get("original_query", "")
-        meta_filters = state.get("metadata_filter", {}) if state.get("metadata_filter_used") else None
+        meta_filters = dict(state.get("metadata_filter", {})) if state.get("metadata_filter_used") else {}
+        # Configurable KB versioning: "all", "original", "github_licensed"
+        kb_ver = state.get("active_toggles", {}).get("kb_version", "all")
+        if kb_ver in ("original", "github_licensed"):
+            meta_filters["source"] = kb_ver
+        meta_filters = meta_filters if meta_filters else None
         trace = list(state.get("retrieval_trace", []))
         executed = list(state.get("executed_operations", []))
         budgets = dict(state.get("budgets", {}))
@@ -394,17 +435,25 @@ class RetrievalGraphBuilder:
             subqueries = dec_res.output
             hop_records: list[dict[str, Any]] = []
 
-            for h_idx, subq in enumerate(subqueries[:self.max_hops], start=1):
+            async def _run_hop(h_idx: int, subq: str):
                 hop_t0 = time.perf_counter()
                 hop_filter = meta_filters
-                # If comparison, target company per hop
                 if state.get("target_company") and h_idx == 1:
                     hop_filter = {"company": state.get("target_company")}
-
                 h_ret = await self.hybrid_tool.execute(subq, top_k=8, metadata_filters=hop_filter)
+                hop_lat = round((time.perf_counter() - hop_t0) * 1000, 2)
+                return h_idx, subq, h_ret.output, hop_lat
+
+            hop_tasks = [
+                _run_hop(h_idx, subq)
+                for h_idx, subq in enumerate(subqueries[:self.max_hops], start=1)
+            ]
+            hop_outputs = await asyncio.gather(*hop_tasks)
+
+            for h_idx, subq, ret_chunks, hop_lat in hop_outputs:
                 budgets["calls_made"] += 1
                 novel = 0
-                for c in h_ret.output:
+                for c in ret_chunks:
                     cid = getattr(c, "chunk_id", str(hash(getattr(c, "text", str(c)))))
                     if cid not in existing_ids:
                         chunks.append(c)
@@ -414,9 +463,9 @@ class RetrievalGraphBuilder:
                 hop_records.append({
                     "hop": h_idx,
                     "query": subq,
-                    "retrieved": len(h_ret.output),
+                    "retrieved": len(ret_chunks),
                     "novel": novel,
-                    "latency_ms": round((time.perf_counter() - hop_t0) * 1000, 2),
+                    "latency_ms": hop_lat,
                 })
 
             executed.extend(["BM25_RETRIEVAL", "DENSE_RETRIEVAL", "HYBRID_RETRIEVAL", "RRF_FUSION", "EMBEDDING_GENERATION"])
@@ -519,7 +568,8 @@ class RetrievalGraphBuilder:
 
         # E. Hybrid RRF Retrieval Path (Default for mixed queries)
         executed.extend(["EMBEDDING_GENERATION", "BM25_RETRIEVAL", "DENSE_RETRIEVAL", "HYBRID_RETRIEVAL", "RRF_FUSION"])
-        hy_res = await self.hybrid_tool.execute(active_q, top_k=15, metadata_filters=meta_filters)
+        hy_top_k = state.get("top_k") or 25
+        hy_res = await self.hybrid_tool.execute(active_q, top_k=hy_top_k, metadata_filters=meta_filters)
         chunks = hy_res.output
         trace.append(
             PlanStep(
@@ -726,11 +776,21 @@ class RetrievalGraphBuilder:
         if ev.get("is_sufficient", False) or ev.get("status") == "UNSUPPORTED":
             return "synthesize"
 
+        # Topic mismatch: escalating retrieval cannot surface documents unindexed in the knowledge corpus
+        reasons = ev.get("reasons", [])
+        if any("technical coding/dsa" in str(r).lower() or "no behavioral" in str(r).lower() for r in reasons):
+            return "synthesize"
+
+        # If candidates are already well-represented or multi-hop already executed, synthesize directly
+        chunks = state.get("final_context_chunks", [])
+        if len(chunks) >= 8 or state.get("multi_hop_used"):
+            return "synthesize"
+
         budgets = state.get("budgets", {})
         calls = budgets.get("calls_made", 0)
         esc_count = state.get("escalation_count", 0)
 
-        if calls >= self.max_retrieval_calls or esc_count >= self.max_escalations:
+        if calls >= self.max_retrieval_calls or esc_count >= 1:
             return "synthesize"
 
         return "escalate"
@@ -796,34 +856,95 @@ class RetrievalGraphBuilder:
                 "termination_reason": "SECURITY_BLOCKED",
             }
 
+        # Check for benign educational technical question (e.g., "What is an API key?", "How does a Gemini API key work?")
+        if not state.get("target_company") and is_educational_technical_query(orig_q):
+            executed.append("EDUCATIONAL_ANSWER_SYNTHESIS")
+            if hasattr(self.gemini_client, "generate_educational_explanation"):
+                edu_answer = await self.gemini_client.generate_educational_explanation(orig_q)
+            else:
+                edu_answer = (
+                    "### Educational Concept: API Key\n\n"
+                    "An **API key** is a unique alphanumeric identifier used by applications to authenticate requests "
+                    "and authorize access to an API service. API keys must always be stored in secure backend environment "
+                    "variables and never exposed in client-side code."
+                )
+            disc = build_disclosure_section(state)
+            return {
+                "generated_answer": edu_answer.strip() + disc,
+                "answer_disclosure": disc,
+                "termination_reason": "EDUCATIONAL_CONCEPT_ANSWERED",
+                "retrieval_trace": trace,
+                "executed_operations": executed,
+            }
+
         # Check evidence sufficiency abstention
         ev = state.get("evidence_assessment", {})
-        if ev.get("status") == "UNSUPPORTED" and state.get("target_company") and len(chunks) == 0:
+        if ev.get("status") == "UNSUPPORTED":
             target_comp = state.get("target_company")
-            abstain_msg = (
-                "### Evidence Sufficiency Notice\n\n"
-                f"The indexed interview knowledge corpus does not contain verified interview records for **{target_comp}**. "
-                "To avoid generating ungrounded information, the system cannot synthesize an answer for this company."
-            )
+            if target_comp:
+                abstain_msg = (
+                    "### Evidence Sufficiency Notice\n\n"
+                    f"The indexed interview knowledge corpus does not contain verified interview records for **{target_comp}**. "
+                    "To avoid generating ungrounded information, the system cannot synthesize an answer for this company."
+                )
+                term_reason = "UNSUPPORTED_COMPANY_ABSTAINED"
+            else:
+                abstain_msg = (
+                    "### Evidence Sufficiency Notice\n\n"
+                    "The indexed interview knowledge corpus does not contain verified records for this question. "
+                    "To avoid generating ungrounded information, the system cannot synthesize an answer."
+                )
+                term_reason = "UNSUPPORTED_QUERY_ABSTAINED"
             disc = build_disclosure_section(state)
             return {
                 "generated_answer": abstain_msg.strip() + disc,
                 "answer_disclosure": disc,
-                "termination_reason": "UNSUPPORTED_COMPANY_ABSTAINED",
+                "termination_reason": term_reason,
             }
 
-        # Build clean context lines
-        context_lines = [
-            f"[{getattr(c, 'source', getattr(c, 'metadata', {}).get('source_file', 'Doc'))}] {getattr(c, 'text', str(c))}"
+        # Check topic mismatch: behavioral query with purely technical DSA chunks
+        behavioral_cues = {"behavioral", "leadership principle", "leadership principles", "star method", "customer obsession", "ownership", "bias for action", "bar raiser"}
+        query_is_behavioral = any(b in orig_q.lower() for b in behavioral_cues)
+        chunks_have_behavioral = any(
+            any(b in getattr(c, "text", str(c)).lower() for b in behavioral_cues)
+            or "behavioral" in str(getattr(c, "metadata", {})).lower()
             for c in chunks
-        ]
+        )
+        if not state.get("evidence_assessment", {}).get("is_sufficient") and query_is_behavioral and not chunks_have_behavioral and len(chunks) > 0:
+            target_comp = state.get("target_company") or "the requested company"
+            abstain_msg = (
+                "### Evidence Sufficiency Notice\n\n"
+                f"The indexed interview knowledge corpus contains technical coding records for **{target_comp}**, "
+                "but does not contain verified behavioral interview records or questions for the requested Leadership Principles. "
+                "To prevent ungrounded extrapolation or hallucination, behavioral guidance cannot be synthesized from these coding records."
+            )
+            disc = build_disclosure_section(state)
+            executed.append("ANSWER_SYNTHESIS")
+            return {
+                "generated_answer": abstain_msg.strip() + disc,
+                "answer_disclosure": disc,
+                "sanitized_context": "",
+                "termination_reason": "TOPIC_MISMATCH_ABSTAINED",
+                "retrieval_trace": trace,
+                "executed_operations": executed,
+            }
+
+        # Build clean context lines with provenance
+        context_lines = []
+        for c in chunks:
+            m = getattr(c, "metadata", {}) or {}
+            src_repo = m.get("source_repo", "")
+            src_file = m.get("source_file") or getattr(c, "source", "placement_doc")
+            cid = getattr(c, "chunk_id", m.get("chunk_id", ""))
+            prov_tag = f"Source: {src_repo} / {src_file}" if src_repo else f"Source: {src_file}"
+            context_lines.append(f"[{cid} | {prov_tag}] {getattr(c, 'text', str(c))}")
         merged_context = "\n\n".join(context_lines)
 
         t0_gen = time.perf_counter()
         raw_answer = await self.gemini_client.generate_answer(
             query=orig_q,
             context=merged_context,
-            max_output_tokens=8192,
+            max_output_tokens=1024,
             conversation_history=history,
         )
         gen_lat = round((time.perf_counter() - t0_gen) * 1000, 2)

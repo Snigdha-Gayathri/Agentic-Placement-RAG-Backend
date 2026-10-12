@@ -18,6 +18,7 @@ class SecurityCategory:
     PROMPT_INJECTION = "PROMPT_INJECTION"
     SYSTEM_INSTRUCTION_EXFILTRATION = "SYSTEM_INSTRUCTION_EXFILTRATION"
     SECRET_EXFILTRATION = "SECRET_EXFILTRATION"
+    CREDENTIAL_EXTRACTION = "SECRET_EXFILTRATION"
     UNAUTHORIZED_TOOL_USE = "UNAUTHORIZED_TOOL_USE"
     SECURITY_BYPASS = "SECURITY_BYPASS"
     MALICIOUS_AUTOMATION = "MALICIOUS_AUTOMATION"
@@ -34,9 +35,9 @@ class SecuritySeverity:
 
 
 PROMPT_INJECTION_PATTERNS = [
-    r"ignore\s+(all\s+)?previous\s+instructions",
-    r"disregard\s+(all\s+)?(previous\s+)?(instructions|rules|guardrails|policies)",
-    r"forget\s+everything",
+    r"ignore\s+(all\s+|your\s+|any\s+|the\s+)?(previous|prior|above|system)?\s*(instructions|directives|rules|guidelines|prompts?)",
+    r"disregard\s+(all\s+|your\s+|any\s+|the\s+)?(previous\s+|prior\s+)?(instructions|rules|guardrails|policies|directives)",
+    r"forget\s+(all\s+|your\s+|everything\s+)?(previous|prior)?\s*(instructions|directives|rules)?",
     r"act\s+as\s+(the\s+)?system",
     r"treat\s+this\s+message\s+as\s+(the\s+)?developer",
     r"reveal\s+(your\s+)?prompt",
@@ -45,7 +46,7 @@ PROMPT_INJECTION_PATTERNS = [
     r"developer\s+mode",
     r"\bDAN\b",
     r"jailbreak",
-    r"override\s+(previous\s+|security\s+)?instructions",
+    r"override\s+(all\s+|your\s+|previous\s+|security\s+|system\s+)?(instructions|rules|guardrails)",
     r"system\s+prompt",
     r"instruction\s+hijack",
     r"you\s+are\s+now\s+in\s+developer\s+mode",
@@ -53,16 +54,20 @@ PROMPT_INJECTION_PATTERNS = [
 ]
 
 SYSTEM_EXFILTRATION_PATTERNS = [
-    r"(reveal|show|print|tell\s+me|display|output|dump)\s+(your\s+|the\s+)?(system\s+prompt|hidden\s+prompt|internal\s+instructions|system\s+message|system\s+instructions)",
-    r"what\s+is\s+your\s+(exact\s+)?(system\s+prompt|initial\s+prompt|hidden\s+instruction)",
+    r"(reveal|show|print|tell\s+me|display|output|dump|disclose|share|provide|expose|leak|echo|fetch|give\s+me)\s+(your\s+|the\s+|all\s+)?([a-z_0-9-]*\s+)?(system\s+prompt|hidden\s+prompt|internal\s+instructions|system\s+message|system\s+instructions|initial\s+prompt|base\s+prompt|developer\s+instructions|meta\s+prompt|system\s+rules)",
+    r"what\s+(is|are)\s+(your\s+|the\s+)?(exact\s+)?(system\s+prompt|initial\s+prompt|hidden\s+instruction|internal\s+instructions|system\s+instructions)",
     r"repeat\s+the\s+words\s+above\s+starting\s+with",
 ]
 
 SECRET_EXFILTRATION_PATTERNS = [
-    r"(reveal|show|print|display|give\s+me|tell\s+me|exfiltrate|leak|dump)\s+(the\s+|your\s+)?([a-z_0-9-]*\s+)?([a-z_0-9-]*api[_-]?key|secret|password|credential|token|\.env|environment\s+variables?)",
-    r"what\s+is\s+the\s+([a-z_0-9-]*\s+)?api[_-]?key",
-    r"echo\s+\$GEMINI_API_KEY",
-    r"gemini_api_key",
+    r"(reveal|show|output|print|display|dump|leak|exfiltrate|disclose|give\s+me|tell\s+me)\s+(the\s+|your\s+|all\s+)?([a-z_0-9-]*\s+)?([a-z_0-9-]*api[ _-]*keys?|secrets?|passwords?|credentials?|tokens?|\.env|os\.environ|environment\s+variables?|env\s+vars?|[a-z0-9_]*key[a-z0-9_]*)",
+    r"(show|print|display|give\s+me|tell\s+me|provide|output|echo|fetch|list|return|export)\s+(your\s+|this\s+(website'?s?|site'?s?|app'?s?|system'?s?)\s+)([a-z_0-9-]*\s+)?([a-z_0-9-]*api[ _-]*keys?|secrets?|passwords?|credentials?|tokens?|\.env|os\.environ|environment\s+variables?|env\s+vars?)",
+    r"(how\s+(can\s+i|to|do\s+i)\s+)?(find|extract|get|steal|locate|inspect|dump|leak|sniff|intercept)\s+(the\s+|your\s+)?([a-z_0-9-]*\s+)?(gemini\s+)?(api[ _-]*keys?|credentials?|secrets?|tokens?)\s+(of|from|in|for)\s+(this\s+|the\s+)?(website|site|app|application|system|page|backend|server)",
+    r"what\s+(is|are)\s+(the\s+|your\s+)?([a-z_0-9-]*\s+)?(api[ _-]*keys?|gemini[ _-]*api[ _-]*keys?|gemini[ _-]*keys?|google[ _-]*api[ _-]*keys?|credentials?|environment\s+variables?|env\s+vars?|secrets?|tokens?)\s+(being\s+used|used\s+by|in\s+use|configured|used\s+here|of\s+this\s+(website|site|app|system)|for\s+this\s+(website|site|app|system))",
+    r"what\s+(is|are)\s+your\s+([a-z_0-9-]*\s+)?(api[ _-]*keys?|gemini[ _-]*api[ _-]*keys?|credentials?|secrets?|tokens?|environment\s+variables?)",
+    r"echo\s+\$[A-Za-z0-9_]*key[A-Za-z0-9_]*",
+    r"echo\s+\$gemini_api_key",
+    r"os\.environ\[",
     r"os\.environ",
 ]
 
@@ -80,14 +85,21 @@ SECURITY_BYPASS_PATTERNS = [
 ]
 
 BENIGN_INJECTION_DISCUSSION_PATTERNS = [
-    r"\b(what\s+is|explain|describe|define|how\s+does|how\s+to\s+prevent|how\s+can\s+we\s+defend|defend\s+against|mitigate|prevent)\b.*\b(prompt\s+injection|jailbreak|adversarial\s+attack|prompt\s+leakage)\b",
-    r"\b(prompt\s+injection|jailbreaking)\b.*\b(definition|concept|examples?|mitigation|defense|vulnerability|in\s+rag)\b",
+    r"\b(what\s+is|what\s+are|explain|describe|define|meaning\s+of|how\s+does|how\s+do|how\s+to\s+secure|how\s+should|how\s+can\s+we\s+secure|how\s+can\s+i\s+secure|how\s+to\s+prevent|how\s+can\s+we\s+defend|defend\s+against|mitigate|prevent|best\s+practices?\s+for|how\s+to\s+securely\s+store|how\s+should\s+i\s+secure|secure\s+an?|securing\s+an?)\b.*\b(prompt\s+injection|jailbreak|adversarial\s+attack|prompt\s+leakage|api[ _-]*keys?|gemini[ _-]*api[ _-]*keys?|api[ _-]*key\s+security|store\s+api[ _-]*keys?|storing\s+api[ _-]*keys?|securely\s+store|environment\s+variables?|credential\s+management)\b",
+    r"\b(prompt\s+injection|jailbreaking|api\s*key\s*security|api[ _-]*keys?)\b.*\b(definition|concept|meaning|examples?|mitigation|defense|vulnerability|in\s+rag|best\s+practices?|how\s+it\s+works)\b",
     r"\bhow\s+can\s+rag\s+systems\s+defend\s+against\s+(it|prompt\s+injection)\b",
     r"\bwhat\s+are\s+prompt\s+injection\s+attacks\b",
+    r"\b(why\s+should\s+you\s+never\s+commit\s+\.env)\b",
+    r"^(what\s+is\s+(an?\s+|the\s+meaning\s+of\s+an?\s+)?api[ _-]*key\??)$",
+    r"^what\s+is\s+the\s+meaning\s+of\s+an?\s+api[ _-]*key\??$",
+    r"^how\s+does\s+(a\s+)?(gemini\s+)?api[ _-]*key\s+work\??$",
+    r"^how\s+should\s+i\s+secure\s+(an?\s+)?api[ _-]*key\??$",
 ]
 
 RETRIEVAL_BLOCK_PATTERNS = [
-    r"ignore\s+previous\s+instructions",
+    r"ignore\s+(all\s+|your\s+|any\s+)?previous\s+instructions",
+    r"disregard\s+(all\s+|your\s+|any\s+)?(previous\s+)?(instructions|rules)",
+    r"reveal\s+(system\s+prompt|credentials|secrets?|api[ _-]*keys?)",
     r"\bassistant:\b",
     r"\bsystem:\b",
     r"\bdeveloper:\b",
@@ -97,6 +109,9 @@ RETRIEVAL_BLOCK_PATTERNS = [
     r"password",
     r"secret",
     r"api\s*key",
+    r"gemini[ _-]?api[ _-]?key",
+    r"credentials?",
+    r"environment\s+variables?",
     r"\b(auth|bearer|secret|access|session|api)[_-]?token\b",
     r"private\s*key",
     r"ssh\s*key",
@@ -109,7 +124,7 @@ RETRIEVAL_BLOCK_PATTERNS = [
 OUTPUT_BLOCK_PATTERNS = [
     r"system\s+prompt",
     r"internal\s+instructions",
-    r"api[_-]?key",
+    r"api[_-]?key\s*[:=]",
     r"password",
     r"authorization:\s*bearer",
     r"BEGIN\s+PRIVATE\s+KEY",

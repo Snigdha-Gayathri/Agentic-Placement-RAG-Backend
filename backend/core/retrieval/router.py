@@ -19,6 +19,7 @@ class RoutingDecision:
     llm_bypass_reason: str = ""
     direct_response: str = ""
     detected_companies: list[str] = field(default_factory=list)
+    detected_roles: list[str] = field(default_factory=list)
     detected_topics: list[str] = field(default_factory=list)
     reasoning: str = ""
 
@@ -32,6 +33,7 @@ class RoutingDecision:
             "llm_bypass_reason": self.llm_bypass_reason,
             "direct_response": self.direct_response,
             "detected_companies": self.detected_companies,
+            "detected_roles": self.detected_roles,
             "detected_topics": self.detected_topics,
             "reasoning": self.reasoning,
         }
@@ -90,6 +92,33 @@ class QueryRouter:
         "tencent": "Tencent", "alibaba": "Alibaba",
     }
 
+    CANONICAL_ROLES = {
+        "sde": "Software Development Engineer",
+        "swe": "Software Development Engineer",
+        "software development engineer": "Software Development Engineer",
+        "software engineer": "Software Development Engineer",
+        "sde 1": "Software Development Engineer",
+        "sde 2": "Software Development Engineer",
+        "sde ii": "Software Development Engineer",
+        "sde i": "Software Development Engineer",
+        "research engineer": "Research Engineer",
+        "machine learning engineer": "Machine Learning Engineer",
+        "ml engineer": "Machine Learning Engineer",
+        "mle": "Machine Learning Engineer",
+        "data engineer": "Data Engineer",
+        "frontend engineer": "Frontend Engineer",
+        "frontend developer": "Frontend Engineer",
+        "backend engineer": "Backend Engineer",
+        "backend developer": "Backend Engineer",
+        "full stack engineer": "Full Stack Engineer",
+        "fullstack engineer": "Full Stack Engineer",
+        "quantitative researcher": "Quantitative Researcher",
+        "quant researcher": "Quantitative Researcher",
+        "systems engineer": "Systems Engineer",
+        "site reliability engineer": "Site Reliability Engineer",
+        "sre": "Site Reliability Engineer",
+    }
+
     OUT_OF_DOMAIN_PATTERNS = [
         r"\b(weather|forecast|temperature in|rain today)\b",
         r"\b(recipe|cook|baking|ingredients for)\b",
@@ -123,54 +152,7 @@ class QueryRouter:
                     reasoning="Out-of-domain pattern detected -> Bypassed LLM generation with direct abstention.",
                 )
 
-        # 2. Check for Direct Metadata Queries (Instant deterministic answer with 0 LLM calls)
-        if re.search(r"\b(what|which|list|show|give me|tell me)\b.*\b(companies|tech companies|organizations)\b", lower) or lower in [
-            "list companies", "supported companies", "indexed companies", "companies in db",
-            "companies in database", "what companies are in the database?", "what companies are indexed?",
-            "what companies are indexed in the knowledge base?"
-        ]:
-            sorted_comps = sorted(set(self.CANONICAL_COMPANIES.values()))
-            comp_list_md = ", ".join(sorted_comps)
-            return RoutingDecision(
-                retriever_type="none",
-                metadata_filters={},
-                needs_multi_hop=False,
-                route_type="METADATA_DIRECT",
-                llm_required=False,
-                llm_bypass_reason="Direct metadata lookup of indexed companies resolved deterministically.",
-                direct_response=(
-                    f"### Indexed Company Knowledge Base ({len(sorted_comps)} Companies)\n\n"
-                    f"The interview knowledge base currently indexes verified interview research, reported questions, and technical preparation handbooks for the following **{len(sorted_comps)} companies**:\n\n"
-                    f"{comp_list_md}\n\n"
-                    "You can ask company-specific interview questions (e.g. *'What technical rounds does OpenAI conduct?'*), topic questions (*'DSA dynamic programming questions'*), or multi-company comparisons (*'Compare OpenAI vs Anthropic interview focus'*)."
-                ),
-                reasoning="Metadata inventory query -> Deterministically answered with 0 LLM calls.",
-            )
-
-        if re.search(r"\b(what|which|list|show|give me|tell me)\b.*\b(topics|interview topics|domains)\b", lower) or lower in [
-            "list topics", "supported topics", "indexed topics", "list all interview topics"
-        ]:
-            sorted_topics = sorted({t.title() for t in self.TOPICS})
-            topics_md = ", ".join(sorted_topics[:25])
-            return RoutingDecision(
-                retriever_type="none",
-                metadata_filters={},
-                needs_multi_hop=False,
-                route_type="METADATA_DIRECT",
-                llm_required=False,
-                llm_bypass_reason="Direct metadata lookup of covered interview topics resolved deterministically.",
-                direct_response=(
-                    "### Covered Technical Interview Topics\n\n"
-                    f"The knowledge corpus contains interview questions and preparation guidance across key domains including:\n\n"
-                    f"- **Data Structures & Algorithms**: {topics_md}\n"
-                    "- **Systems & Architecture**: System Design, Distributed Systems, Scalability, OS, Databases, Networking\n"
-                    "- **AI & Machine Learning**: LLM Agents, RAG Pipelines, Inference Optimization, AI Safety, RLHF, Fine-Tuning\n"
-                    "- **Behavioral & Leadership**: Company Leadership Principles, Behavioral Rounds, HR Rounds\n"
-                ),
-                reasoning="Topic metadata query -> Deterministically answered with 0 LLM calls.",
-            )
-
-        # 3. Detect companies mentioned in query
+        # 2. Extract Companies Mentioned in Query
         detected_companies: list[str] = []
         for comp, canonical in sorted(self.CANONICAL_COMPANIES.items(), key=lambda x: -len(x[0])):
             pattern = r"\b" + re.escape(comp) + r"\b"
@@ -178,7 +160,72 @@ class QueryRouter:
                 if canonical not in detected_companies:
                     detected_companies.append(canonical)
 
-        # 4. Detect topics mentioned in query
+        # 3. Extract Roles Mentioned in Query
+        detected_roles: list[str] = []
+        for role_key, canonical_role in sorted(self.CANONICAL_ROLES.items(), key=lambda x: -len(x[0])):
+            pattern = r"\b" + re.escape(role_key) + r"\b"
+            if re.search(pattern, lower):
+                if canonical_role not in detected_roles:
+                    detected_roles.append(canonical_role)
+
+        # 4. Check for Direct Metadata Inventory Queries (ONLY pure inventory listing, not specific interview questions)
+        is_interview_or_topic_query = bool(
+            detected_companies
+            or any(kw in lower for kw in ["leetcode", "sql", "dsa", "graph", "tree", "round", "question", "questions", "interview", "proof", "problem", "tell me about", "what are the"])
+        )
+
+        if not is_interview_or_topic_query:
+            if lower in [
+                "list companies", "supported companies", "indexed companies", "companies in db",
+                "companies in database", "what companies are in the database?", "what companies are indexed?",
+                "what companies are indexed in the knowledge base?"
+            ]:
+                sorted_comps = sorted(set(self.CANONICAL_COMPANIES.values()))
+                comp_list_md = ", ".join(sorted_comps)
+                return RoutingDecision(
+                    retriever_type="none",
+                    metadata_filters={},
+                    needs_multi_hop=False,
+                    route_type="METADATA_DIRECT",
+                    llm_required=False,
+                    llm_bypass_reason="Direct metadata lookup of indexed companies resolved deterministically.",
+                    direct_response=(
+                        f"### Indexed Company Knowledge Base ({len(sorted_comps)} Companies)\n\n"
+                        f"The interview knowledge base currently indexes verified interview research, reported questions, and technical preparation handbooks for the following **{len(sorted_comps)} companies**:\n\n"
+                        f"{comp_list_md}\n\n"
+                        "You can ask company-specific interview questions (e.g. *'What technical rounds does OpenAI conduct?'*), topic questions (*'DSA dynamic programming questions'*), or multi-company comparisons (*'Compare OpenAI vs Anthropic interview focus'*)."
+                    ),
+                    reasoning="Metadata inventory query -> Deterministically answered with 0 LLM calls.",
+                    detected_companies=detected_companies,
+                    detected_roles=detected_roles,
+                )
+
+            if lower in [
+                "list topics", "supported topics", "indexed topics", "list all interview topics", "what topics are covered?", "what topics are indexed?"
+            ]:
+                sorted_topics = sorted({t.title() for t in self.TOPICS})
+                topics_md = ", ".join(sorted_topics[:25])
+                return RoutingDecision(
+                    retriever_type="none",
+                    metadata_filters={},
+                    needs_multi_hop=False,
+                    route_type="METADATA_DIRECT",
+                    llm_required=False,
+                    llm_bypass_reason="Direct metadata lookup of covered interview topics resolved deterministically.",
+                    direct_response=(
+                        "### Covered Technical Interview Topics\n\n"
+                        f"The knowledge corpus contains interview questions and preparation guidance across key domains including:\n\n"
+                        f"- **Data Structures & Algorithms**: {topics_md}\n"
+                        "- **Systems & Architecture**: System Design, Distributed Systems, Scalability, OS, Databases, Networking\n"
+                        "- **AI & Machine Learning**: LLM Agents, RAG Pipelines, Inference Optimization, AI Safety, RLHF, Fine-Tuning\n"
+                        "- **Behavioral & Leadership**: Company Leadership Principles, Behavioral Rounds, HR Rounds\n"
+                    ),
+                    reasoning="Topic metadata query -> Deterministically answered with 0 LLM calls.",
+                    detected_companies=detected_companies,
+                    detected_roles=detected_roles,
+                )
+
+        # 5. Detect topics mentioned in query
         detected_topics: list[str] = []
         for topic in self.TOPICS:
             if re.search(r"\b" + re.escape(topic) + r"\b", lower):
@@ -186,22 +233,24 @@ class QueryRouter:
                 if topic_key not in detected_topics:
                     detected_topics.append(topic_key)
 
-        # Multi-company or comparison detection
+        # Calibrated Multi-Hop Determination (distinguish true comparisons / multi-stage sequences from single-entity queries)
         is_comparison = bool(
-            len(detected_companies) > 1
-            or ("compare" in lower and ("and" in lower or "vs" in lower))
-            or "difference between" in lower
-            or " vs " in lower
+            len(detected_companies) >= 2
+            and any(term in lower for term in [" vs ", " compare ", "difference between", "differ between", "versus", " compared to "])
         )
-
-        # Multi-round detection (multi-hop within a single company)
-        has_multi_round = bool(
-            ("round" in lower and ("1" in lower or "2" in lower or "technical" in lower or "hr" in lower or "all rounds" in lower or "multiple rounds" in lower))
-            or "interview stages" in lower
-            or "interview process and coding" in lower
+        is_multi_stage_sequence = bool(
+            ("round 1" in lower and "round 2" in lower)
+            or ("screening" in lower and "onsite" in lower)
+            or ("online assessment" in lower and "onsite" in lower)
+            or ("coding round" in lower and "behavioral round" in lower)
+            or ("technical round" in lower and "hr round" in lower)
         )
-
-        needs_multi_hop = is_comparison or has_multi_round or len(query.split()) > 25
+        is_compound_multi_entity = bool(
+            len(detected_companies) >= 2 and (" and " in lower or " as well as " in lower)
+        )
+        needs_multi_hop = bool(
+            is_comparison or is_multi_stage_sequence or is_compound_multi_entity
+        )
 
         if len(detected_companies) == 1 and not is_comparison:
             filters["company"] = detected_companies[0]
@@ -218,6 +267,13 @@ class QueryRouter:
         else:
             reasoning_parts.append("General technical interview query -> hybrid retrieval")
             route_type = "SINGLE_HOP"
+
+        # Add single role filter if uniquely extracted
+        if len(detected_roles) == 1:
+            filters["role"] = detected_roles[0]
+            reasoning_parts.append(f"Target role detected: {detected_roles[0]}")
+        elif detected_roles:
+            reasoning_parts.append(f"Target roles detected: {', '.join(detected_roles)}")
 
         # Determine retrieval method
         retriever_type = "hybrid"
@@ -244,6 +300,7 @@ class QueryRouter:
             llm_required=True,
             llm_bypass_reason="",
             detected_companies=detected_companies,
+            detected_roles=detected_roles,
             detected_topics=detected_topics,
             reasoning=reasoning,
         )

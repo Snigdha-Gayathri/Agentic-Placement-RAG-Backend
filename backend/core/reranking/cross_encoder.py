@@ -50,20 +50,21 @@ class CrossEncoderReranker(BaseReranker):
                 return _SHARED_CROSS_ENCODER if _SHARED_CROSS_ENCODER is not False else None
 
             try:
-                # Constrain PyTorch thread pools to prevent multithread memory explosions
-                os.environ["OMP_NUM_THREADS"] = "1"
-                os.environ["MKL_NUM_THREADS"] = "1"
-                os.environ["OPENBLAS_NUM_THREADS"] = "1"
+                # Configure PyTorch CPU threads (use available cores up to 4 for optimal latency)
+                threads = min(4, os.cpu_count() or 4)
+                os.environ["OMP_NUM_THREADS"] = str(threads)
+                os.environ["MKL_NUM_THREADS"] = str(threads)
+                os.environ["OPENBLAS_NUM_THREADS"] = str(threads)
                 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
                 import torch
-                torch.set_num_threads(1)
+                torch.set_num_threads(threads)
                 torch.set_num_interop_threads(1)
                 torch.set_grad_enabled(False)
 
                 from sentence_transformers import CrossEncoder
 
-                logger.info("Initializing shared CrossEncoder: %s (CPU, single-thread, max_length=128)", self.model_name)
+                logger.info("Initializing shared CrossEncoder: %s (CPU, %d threads, max_length=128)", self.model_name, threads)
                 _SHARED_CROSS_ENCODER = CrossEncoder(
                     self.model_name,
                     device="cpu",
@@ -81,6 +82,10 @@ class CrossEncoderReranker(BaseReranker):
 
         return _SHARED_CROSS_ENCODER if _SHARED_CROSS_ENCODER is not False else None
 
+    def warmup(self) -> None:
+        """Pre-load model weights to eliminate cold-start query latency."""
+        self._get_model()
+
     def rerank(
         self, query: str, chunks: list[ScoredChunk], top_k: int = 5
     ) -> RerankingResult:
@@ -94,10 +99,10 @@ class CrossEncoderReranker(BaseReranker):
         if model:
             try:
                 import torch
-                # Truncate text pairs to bounded size for fast evaluation & minimal tensor RAM
-                pairs = [[query, getattr(c, "text", str(c))[:300]] for c in chunks]
+                # Truncate text pairs to bounded size (1500 chars) for accurate relevance scoring within MiniLM 512 token budget
+                pairs = [[query, getattr(c, "text", str(c))[:1500]] for c in chunks]
                 with torch.inference_mode():
-                    scores = model.predict(pairs, batch_size=4, show_progress_bar=False)
+                    scores = model.predict(pairs, batch_size=16, show_progress_bar=False)
 
                 for orig_rank_0, (chunk, s) in enumerate(zip(chunks, scores)):
                     orig_rank = orig_rank_0 + 1
