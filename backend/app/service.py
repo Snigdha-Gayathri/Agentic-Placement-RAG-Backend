@@ -754,15 +754,81 @@ class SecureRAGService:
         )
 
         candidate_chunks = agent_exec_res.chunks
+        fallback_used = False
 
         if not candidate_chunks:
-            candidate_chunks = self.legacy_retriever.retrieve(
-                standalone_query,
-                self.legacy_vector_store.search(
+            target_comp_val = meta_filters.get("company") if meta_filters else None
+            if not target_comp_val and routing.detected_companies and len(routing.detected_companies) == 1:
+                target_comp_val = routing.detected_companies[0]
+
+            if target_comp_val:
+                target_comp_str = str(target_comp_val).strip()
+                logger.info(
+                    "Primary agent retrieval returned 0 candidates for company %r; executing company-filtered fallback.",
+                    target_comp_str,
+                )
+                # 1. First invoke existing BM25 sparse retriever with company filter (0 external API dependencies)
+                try:
+                    bm25_fb = await self.bm25_retriever.retrieve(
+                        standalone_query,
+                        top_k=top_k,
+                        metadata_filters={"company": target_comp_str},
+                        fallback_unfiltered=False,
+                    )
+                    if bm25_fb and bm25_fb.chunks:
+                        candidate_chunks = [
+                            c for c in bm25_fb.chunks
+                            if str(
+                                getattr(c, "metadata", {}).get("company", "")
+                                if isinstance(getattr(c, "metadata", None), dict)
+                                else getattr(c, "company", "")
+                            ).strip().lower() == target_comp_str.lower()
+                        ]
+                        if candidate_chunks:
+                            fallback_used = True
+                            logger.info(
+                                "Recovered %d chunks for %r via BM25 company-filtered fallback.",
+                                len(candidate_chunks),
+                                target_comp_str,
+                            )
+                except Exception as fb_exc:
+                    logger.warning("BM25 company-filtered fallback error: %s", fb_exc)
+
+                # 2. If BM25 returned no company candidates, try dense retriever with company filter
+                if not candidate_chunks:
+                    try:
+                        dense_fb = await self.dense_retriever.retrieve(
+                            standalone_query,
+                            top_k=top_k,
+                            metadata_filters={"company": target_comp_str},
+                        )
+                        if dense_fb and dense_fb.chunks:
+                            candidate_chunks = [
+                                c for c in dense_fb.chunks
+                                if str(
+                                    getattr(c, "metadata", {}).get("company", "")
+                                    if isinstance(getattr(c, "metadata", None), dict)
+                                    else getattr(c, "company", "")
+                                ).strip().lower() == target_comp_str.lower()
+                            ]
+                            if candidate_chunks:
+                                fallback_used = True
+                                logger.info(
+                                    "Recovered %d chunks for %r via Dense company-filtered fallback.",
+                                    len(candidate_chunks),
+                                    target_comp_str,
+                                )
+                    except Exception as fb_exc:
+                        logger.warning("Dense company-filtered fallback error: %s", fb_exc)
+            else:
+                # General non-company queries: safe fallback to legacy vector store
+                candidate_chunks = self.legacy_retriever.retrieve(
                     standalone_query,
-                    top_k=self.config.max_retrieved_chunks,
-                ),
-            )
+                    self.legacy_vector_store.search(
+                        standalone_query,
+                        top_k=self.config.max_retrieved_chunks,
+                    ),
+                )
 
         # Strictly enforce company metadata filter if single target company
         if meta_filters and meta_filters.get("company"):
@@ -951,6 +1017,7 @@ class SecureRAGService:
         ttft_ms = 0.0
 
         if should_abstain:
+            unique_companies = sorted(list(dict.fromkeys(QueryRouter.CANONICAL_COMPANIES.values()))[:15])
             raw_output = (
                 "### Evidence Sufficiency Notice\n\n"
                 "The indexed interview knowledge corpus does not "
@@ -959,7 +1026,7 @@ class SecureRAGService:
                 "ungrounded information, the system cannot "
                 "synthesize an answer for this company.\n\n"
                 "Supported indexed companies include "
-                f"{', '.join(sorted(list(QueryRouter.CANONICAL_COMPANIES.values())[:15]))}, "
+                f"{', '.join(unique_companies)}, "
                 "etc."
             )
 
@@ -967,7 +1034,7 @@ class SecureRAGService:
             latency_breakdown.generation_ms = 1.0
 
         else:
-            if agent_exec_res.answer:
+            if agent_exec_res.answer and not fallback_used:
                 raw_output = agent_exec_res.answer
                 ttft_ms = 10.0
                 latency_breakdown.generation_ms = round((time.perf_counter() - gen_start) * 1000, 2)
@@ -1251,15 +1318,23 @@ class SecureRAGService:
                     for h in agent_exec_res.hops
                 ],
                 reasoning_trace=[
-                    s.to_dict()
-                    for s in agent_exec_res.trace.steps
+                    s.to_dict() if hasattr(s, "to_dict") else s
+                    for s in (
+                        agent_exec_res.trace.steps
+                        if hasattr(agent_exec_res.trace, "steps")
+                        else (agent_exec_res.trace if isinstance(agent_exec_res.trace, list) else [])
+                    )
                 ],
                 tool_selections=[
-                    s.tool_name
-                    for s in agent_exec_res.trace.steps
+                    getattr(s, "tool_name", str(s))
+                    for s in (
+                        agent_exec_res.trace.steps
+                        if hasattr(agent_exec_res.trace, "steps")
+                        else (agent_exec_res.trace if isinstance(agent_exec_res.trace, list) else [])
+                    )
                 ],
                 iterations=(
-                    agent_exec_res.trace.iterations_taken
+                    getattr(agent_exec_res.trace, "iterations_taken", 1)
                 ),
             ),
             generation_info=GenerationInfo(
